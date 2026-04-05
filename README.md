@@ -28,7 +28,7 @@ macOS 刘海区域的 AI 编程会话监控工具。当你同时开多个 Claude
 
 ### 从 DMG 安装
 
-下载 `VibePet-1.0.0.dmg`，打开后将 VibePet 拖入 Applications 文件夹。
+下载 [`VibePet-1.0.0.dmg`](https://bytedance.larkoffice.com/wiki/W0K4wdTPSijYIFkdfascj7agnhe)，打开后将 VibePet 拖入 Applications 文件夹。
 
 ### 从源码构建
 
