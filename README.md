@@ -4,7 +4,7 @@ macOS 刘海区域的 AI 编程会话监控工具。当你同时开多个 Claude
 
 一只像素猫住在你的刘海旁边，陪你写代码。
 
-<img src="assets/screenshot-main.png" height="313">
+<img src="assets/screenshot-main.png" height="150">
 
 ## 功能
 
