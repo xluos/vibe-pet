@@ -3,6 +3,7 @@ import Foundation
 @Observable
 final class SessionStore {
     var sessions: [String: Session] = [:]
+    private let endedSessionRetentionDays = 7
 
     private static var storePath: URL {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".vibe-pet")
@@ -12,6 +13,7 @@ final class SessionStore {
 
     init() {
         load()
+        purgeExpiredEndedSessions()
     }
 
     // MARK: - Computed
@@ -115,6 +117,7 @@ final class SessionStore {
     // MARK: - Persistence
 
     private func save() {
+        purgeExpiredEndedSessions()
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -129,6 +132,16 @@ final class SessionStore {
         guard let list = try? decoder.decode([Session].self, from: data) else { return }
         for session in list {
             sessions[session.id] = session
+        }
+    }
+
+    private func purgeExpiredEndedSessions(referenceDate: Date = Date()) {
+        guard let cutoff = Calendar.current.date(byAdding: .day, value: -endedSessionRetentionDays, to: referenceDate) else {
+            return
+        }
+
+        sessions = sessions.filter { _, session in
+            session.status != .ended || session.lastEventAt >= cutoff
         }
     }
 }
