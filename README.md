@@ -3,7 +3,8 @@
 macOS 刘海区域的 AI 编程会话监控工具。当你同时开多个 Claude Code / Codex / Coco 会话时，VibePet 帮你追踪每个会话的状态，在需要操作时用提示音通知你。
 
 一只像素猫住在你的刘海旁边，陪你写代码。
-<img src="assets/screenshot-main.png">
+
+<img src="assets/screenshot-main.png" height="313">
 
 ## 功能
 
