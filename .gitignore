@@ -1,0 +1,23 @@
+# Build
+.build/
+VibePet.app/
+
+# Distribution
+*.dmg
+*.zip
+dist_tmp/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Obsidian
+.obsidian/
+
+# IDE
+*.xcodeproj/
+*.xcworkspace/
+.swiftpm/
+
+# Logs
+*.log

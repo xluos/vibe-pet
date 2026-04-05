@@ -1,0 +1,341 @@
+import Foundation
+
+final class HookInstaller {
+    private var bridgeCommand: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return "\(home)/.vibe-pet/bin/vibe-pet-bridge"
+    }
+
+    func installAll() {
+        do {
+            try installClaudeHooks()
+            print("[VibePet] Claude Code hooks installed")
+        } catch {
+            print("[VibePet] Failed to install Claude hooks: \(error)")
+        }
+
+        do {
+            try installCodexHooks()
+            print("[VibePet] Codex hooks installed")
+        } catch {
+            print("[VibePet] Failed to install Codex hooks: \(error)")
+        }
+
+        do {
+            try installCocoHooks()
+            print("[VibePet] Coco hooks installed")
+        } catch {
+            print("[VibePet] Failed to install Coco hooks: \(error)")
+        }
+
+        UserDefaults.standard.set(true, forKey: "vibepet.hooksInstalled")
+    }
+
+    func uninstallAll() {
+        do { try uninstallClaudeHooks(); print("[VibePet] Claude hooks removed") }
+        catch { print("[VibePet] Failed to remove Claude hooks: \(error)") }
+
+        do { try uninstallCodexHooks(); print("[VibePet] Codex hooks removed") }
+        catch { print("[VibePet] Failed to remove Codex hooks: \(error)") }
+
+        do { try uninstallCocoHooks(); print("[VibePet] Coco hooks removed") }
+        catch { print("[VibePet] Failed to remove Coco hooks: \(error)") }
+
+        UserDefaults.standard.set(false, forKey: "vibepet.hooksInstalled")
+    }
+
+    /// Only install if not explicitly uninstalled by user
+    func installIfNeeded() {
+        // First launch (key doesn't exist) or previously installed → install
+        let key = "vibepet.hooksInstalled"
+        if UserDefaults.standard.object(forKey: key) == nil || UserDefaults.standard.bool(forKey: key) {
+            installAll()
+        } else {
+            print("[VibePet] Hooks previously uninstalled by user, skipping auto-install")
+        }
+    }
+
+    // MARK: - Claude Code (~/.claude/settings.json)
+
+    private func installClaudeHooks() throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let dir = home.appendingPathComponent(".claude")
+        guard FileManager.default.fileExists(atPath: dir.path) else {
+            print("[VibePet] ~/.claude not found, skipping Claude hooks")
+            return
+        }
+        let settingsPath = dir.appendingPathComponent("settings.json")
+
+        var config = readJSON(at: settingsPath) ?? [:]
+
+        // Create backup
+        backup(file: settingsPath)
+
+        // Get or create hooks dict
+        var hooks = config["hooks"] as? [String: Any] ?? [:]
+
+        let claudeEvents = [
+            "SessionStart", "SessionEnd", "Stop", "PermissionRequest",
+            "Notification", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+        ]
+
+        for event in claudeEvents {
+            let timeout: Int = event == "PermissionRequest" ? 86400 : 10
+            hooks[event] = mergeHookEntry(
+                existing: hooks[event] as? [[String: Any]] ?? [],
+                command: "\(bridgeCommand) --source claude",
+                timeout: timeout
+            )
+        }
+
+        config["hooks"] = hooks
+        try writeJSON(config, to: settingsPath)
+    }
+
+    // MARK: - Codex (~/.codex/hooks.json)
+
+    private func installCodexHooks() throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let dir = home.appendingPathComponent(".codex")
+        guard FileManager.default.fileExists(atPath: dir.path) else {
+            print("[VibePet] ~/.codex not found, skipping Codex hooks")
+            return
+        }
+        let hooksPath = dir.appendingPathComponent("hooks.json")
+
+        var config = readJSON(at: hooksPath) ?? [:]
+
+        backup(file: hooksPath)
+
+        var hooks = config["hooks"] as? [String: Any] ?? [:]
+
+        let codexEvents = ["SessionStart", "UserPromptSubmit", "Stop"]
+
+        for event in codexEvents {
+            hooks[event] = mergeHookEntry(
+                existing: hooks[event] as? [[String: Any]] ?? [],
+                command: "\(bridgeCommand) --source codex",
+                timeout: 5
+            )
+        }
+
+        config["hooks"] = hooks
+        try writeJSON(config, to: hooksPath)
+    }
+
+    // MARK: - Helpers
+
+    // MARK: - Coco / Trae CLI (~/.trae/traecli.yaml)
+
+    private func installCocoHooks() throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let dir = home.appendingPathComponent(".trae")
+        guard FileManager.default.fileExists(atPath: dir.path) else {
+            print("[VibePet] ~/.trae not found, skipping Coco hooks")
+            return
+        }
+        let yamlPath = dir.appendingPathComponent("traecli.yaml")
+
+        backup(file: yamlPath)
+
+        var content = (try? String(contentsOf: yamlPath, encoding: .utf8)) ?? ""
+
+        // First remove any existing vibe-pet hook block
+        content = removeCocoVibePetBlock(from: content)
+
+        // Append our hook entry to the hooks array
+        let hookBlock = """
+          - type: command
+            command: '\(bridgeCommand) --source coco'
+            matchers:
+              - event: user_prompt_submit
+              - event: post_tool_use
+              - event: stop
+              - event: subagent_stop
+        """
+
+        if content.contains("\nhooks:") || content.hasPrefix("hooks:") {
+            // Append to existing hooks array
+            content += "\n" + hookBlock + "\n"
+        } else {
+            // Create hooks section
+            content += "\nhooks:\n" + hookBlock + "\n"
+        }
+
+        try content.write(to: yamlPath, atomically: true, encoding: .utf8)
+    }
+
+    private func uninstallCocoHooks() throws {
+        let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".trae/traecli.yaml")
+        guard let content = try? String(contentsOf: path, encoding: .utf8) else { return }
+        guard content.contains("vibe-pet-bridge") else { return }
+        backup(file: path)
+
+        let cleaned = removeCocoVibePetBlock(from: content)
+        try cleaned.write(to: path, atomically: true, encoding: .utf8)
+    }
+
+    /// Remove the vibe-pet hook block from Coco YAML content
+    private func removeCocoVibePetBlock(from content: String) -> String {
+        let lines = content.components(separatedBy: "\n")
+        var result: [String] = []
+        var i = 0
+
+        while i < lines.count {
+            let line = lines[i]
+
+            // Detect start of a hook entry: "  - type: command"
+            // Then look ahead to see if it contains vibe-pet-bridge
+            if line.trimmingCharacters(in: .whitespaces).hasPrefix("- type: command") {
+                // Collect this entire hook block
+                var block: [String] = [line]
+                let baseIndent = line.prefix(while: { $0 == " " }).count
+                var j = i + 1
+
+                while j < lines.count {
+                    let nextLine = lines[j]
+                    let trimmed = nextLine.trimmingCharacters(in: .whitespaces)
+                    if trimmed.isEmpty { j += 1; continue }
+                    let indent = nextLine.prefix(while: { $0 == " " }).count
+                    // If indent is greater than base, it's part of this block
+                    // If it's another "- type:" at same level, it's a new block
+                    if indent > baseIndent || (indent == baseIndent && !trimmed.hasPrefix("- ")) {
+                        block.append(nextLine)
+                        j += 1
+                    } else {
+                        break
+                    }
+                }
+
+                let blockText = block.joined(separator: "\n")
+                if blockText.contains("vibe-pet-bridge") || blockText.contains("VibePet") {
+                    // Skip this block (also skip preceding comment)
+                    if let last = result.last, last.contains("VibePet") {
+                        result.removeLast()
+                    }
+                    i = j
+                    continue
+                } else if blockText.trimmingCharacters(in: .whitespacesAndNewlines) == "- type: command" {
+                    // Empty/orphaned entry, skip it
+                    i = j
+                    continue
+                } else {
+                    result.append(contentsOf: block)
+                    i = j
+                    continue
+                }
+            }
+
+            // Skip standalone VibePet comment lines
+            if line.contains("# VibePet") {
+                i += 1
+                continue
+            }
+
+            result.append(line)
+            i += 1
+        }
+
+        // Clean up trailing empty lines
+        while result.last?.trimmingCharacters(in: .whitespaces).isEmpty == true && result.count > 1 {
+            result.removeLast()
+        }
+
+        return result.joined(separator: "\n") + "\n"
+    }
+
+    private func isVibePetCommand(_ cmd: String?) -> Bool {
+        guard let cmd else { return false }
+        return cmd.contains("vibe-pet-bridge") || cmd.contains("vibe-cat-bridge")
+    }
+
+    private func uninstallClaudeHooks() throws {
+        let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/settings.json")
+        guard var config = readJSON(at: path) else { return }
+        guard var hooks = config["hooks"] as? [String: Any] else { return }
+        backup(file: path)
+        for key in hooks.keys {
+            if var entries = hooks[key] as? [[String: Any]] {
+                entries.removeAll { entry in
+                    guard let h = entry["hooks"] as? [[String: Any]] else { return false }
+                    return h.contains { isVibePetCommand($0["command"] as? String) }
+                }
+                hooks[key] = entries.isEmpty ? nil : entries
+            }
+        }
+        config["hooks"] = hooks.isEmpty ? nil : hooks
+        try writeJSON(config, to: path)
+    }
+
+    private func uninstallCodexHooks() throws {
+        let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/hooks.json")
+        guard var config = readJSON(at: path) else { return }
+        guard var hooks = config["hooks"] as? [String: Any] else { return }
+        backup(file: path)
+        for key in hooks.keys {
+            if var entries = hooks[key] as? [[String: Any]] {
+                entries.removeAll { entry in
+                    guard let h = entry["hooks"] as? [[String: Any]] else { return false }
+                    return h.contains { isVibePetCommand($0["command"] as? String) }
+                }
+                hooks[key] = entries.isEmpty ? nil : entries
+            }
+        }
+        config["hooks"] = hooks.isEmpty ? nil : hooks
+        try writeJSON(config, to: path)
+    }
+
+    // MARK: - Helpers (JSON)
+
+    /// Merge our hook entry into existing entries without removing others
+    private func mergeHookEntry(existing: [[String: Any]], command: String, timeout: Int) -> [[String: Any]] {
+        let vibePetHook: [String: Any] = [
+            "type": "command",
+            "command": command,
+            "timeout": timeout,
+        ]
+
+        let vibePetEntry: [String: Any] = [
+            "matcher": "*",
+            "hooks": [vibePetHook],
+        ]
+
+        // Check if we already have a vibe-pet entry
+        var entries = existing
+        if let idx = entries.firstIndex(where: { entry in
+            guard let hooks = entry["hooks"] as? [[String: Any]] else { return false }
+            return hooks.contains { hook in
+                (hook["command"] as? String)?.contains("vibe-pet-bridge") == true
+            }
+        }) {
+            entries[idx] = vibePetEntry
+        } else {
+            entries.append(vibePetEntry)
+        }
+
+        return entries
+    }
+
+    private func readJSON(at url: URL) -> [String: Any]? {
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return json
+    }
+
+    private func writeJSON(_ dict: [String: Any], to url: URL) throws {
+        let data = try JSONSerialization.data(
+            withJSONObject: dict,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        try data.write(to: url, options: .atomic)
+    }
+
+    private func backup(file url: URL) {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let backupURL = url.appendingPathExtension("vibe-pet-backup")
+        try? FileManager.default.removeItem(at: backupURL)
+        try? FileManager.default.copyItem(at: url, to: backupURL)
+    }
+}
