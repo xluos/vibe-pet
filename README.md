@@ -69,3 +69,6 @@ make dmg        # 打包 DMG（需要 brew install create-dmg）
 - macOS 14.0+
 - Unix domain socket IPC
 - AVAudioEngine 程序化生成音效
+
+## 创意来源
+https://github.com/farouqaldori/claude-island
