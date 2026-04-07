@@ -33,10 +33,12 @@ macOS 刘海区域的 AI 编程会话监控工具。当你同时开多个 Claude
 
 ## 安装
 
-### dmg安装
-[Release下载安装](https://github.com/flytomoon-tech/vibe-pet/releases)
+### 从 DMG 安装
+
+下载 [`VibePet-1.0.0.dmg`](https://bytedance.larkoffice.com/wiki/W0K4wdTPSijYIFkdfascj7agnhe)，打开后将 VibePet 拖入 Applications 文件夹。
 
 ### 从源码构建
+https://github.com/flytomoon-tech/vibe-pet/releases
 
 ```bash
 git clone <repo-url>
@@ -68,6 +70,3 @@ make dmg        # 打包 DMG（需要 brew install create-dmg）
 - macOS 14.0+
 - Unix domain socket IPC
 - AVAudioEngine 程序化生成音效
-
-## 创意来源
-https://github.com/farouqaldori/claude-island
