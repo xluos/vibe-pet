@@ -34,7 +34,7 @@ macOS 刘海区域的 AI 编程会话监控工具。当你同时开多个 Claude
 ## 安装
 
 ### dmg安装
-Release下载安装
+[Release下载安装](https://github.com/flytomoon-tech/vibe-pet/releases)
 
 ### 从源码构建
 
