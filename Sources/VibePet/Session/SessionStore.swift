@@ -56,8 +56,12 @@ final class SessionStore {
             terminalBundleId: message.terminalBundleId
         )
 
-        // Don't update archived sessions
-        if session.status == .archived { return }
+        // Revive archived sessions that are still sending events (e.g. app restarted while CLI still running)
+        if session.status == .archived && message.hookEvent != "SessionEnd" {
+            session.status = .active
+        } else if session.status == .archived {
+            return
+        }
 
         if let cwd = message.cwd { session.cwd = cwd }
         if let tty = message.tty { session.tty = tty }
