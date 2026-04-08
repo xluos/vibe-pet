@@ -12,7 +12,7 @@ class SettingsWindowController: NSWindowController {
         }
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 560),
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 660),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -39,6 +39,8 @@ struct SettingsWindowView: View {
     @AppStorage(DisplayPreferences.lockedDisplayIDKey) private var lockedDisplayID = ""
     @AppStorage(AttentionAnimationPreferences.strongEnabledKey) private var strongAttentionAnimationEnabled = false
     @AppStorage(AttentionAnimationPreferences.styleKey) private var strongAttentionAnimationStyleRawValue = AttentionAnimationPreferences.defaultStrongStyle.rawValue
+    @AppStorage(AttentionAnimationPreferences.soundEnabledKey) private var strongAttentionAnimationSoundEnabledStored = true
+    @AppStorage(AttentionAnimationPreferences.soundCadenceKey) private var strongAttentionAnimationSoundCadenceRawValue = AttentionAnimationPreferences.defaultSoundCadence.rawValue
     @State private var displayOptions = DisplayPreferences.availableDisplays()
 
     var body: some View {
@@ -84,6 +86,14 @@ struct SettingsWindowView: View {
                         settingsAttentionPickerRow("Animation style", icon: "waveform.path.ecg", iconColor: .pink)
                         Divider().padding(.leading, 40)
                         settingsInfoRow("Effect", icon: "wand.and.stars", iconColor: .pink, value: selectedStrongAttentionAnimationStyle.settingsSummary)
+                        Divider().padding(.leading, 40)
+                        settingsToggleRow("Reminder sound", icon: "bell.badge", iconColor: .orange, isOn: strongAttentionSoundEnabledBinding)
+                        if resolvedStrongAttentionSoundEnabled {
+                            Divider().padding(.leading, 40)
+                            settingsAttentionSoundCadenceRow("Sound cadence", icon: "metronome", iconColor: .orange)
+                            Divider().padding(.leading, 40)
+                            settingsInfoRow("Cadence", icon: "timer", iconColor: .orange, value: selectedStrongAttentionSoundCadence.settingsSummary)
+                        }
                     } else {
                         Divider().padding(.leading, 40)
                         settingsInfoRow("Effect", icon: "wand.and.stars", iconColor: .gray, value: "关闭后使用默认弱提醒动画")
@@ -137,7 +147,7 @@ struct SettingsWindowView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
         }
-        .frame(width: 420, height: 560)
+        .frame(width: 420, height: 660)
         .onAppear(perform: reloadDisplays)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
             reloadDisplays()
@@ -254,6 +264,25 @@ struct SettingsWindowView: View {
         .frame(height: 32)
     }
 
+    private func settingsAttentionSoundCadenceRow(_ label: String, icon: String, iconColor: Color) -> some View {
+        HStack(spacing: 10) {
+            iconBadge(icon, color: iconColor)
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundColor(.primary)
+            Spacer()
+            Picker("", selection: strongAttentionSoundCadenceBinding) {
+                ForEach(AttentionReminderSoundCadence.allCases) { option in
+                    Text(option.displayName)
+                        .tag(option)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 190)
+        }
+        .frame(height: 32)
+    }
+
     private func iconBadge(_ name: String, color: Color) -> some View {
         Image(systemName: name)
             .font(.system(size: 12, weight: .medium))
@@ -297,6 +326,28 @@ struct SettingsWindowView: View {
 
     private var selectedStrongAttentionAnimationStyle: AttentionAnimationVariant {
         AttentionAnimationVariant(rawValue: strongAttentionAnimationStyleRawValue) ?? AttentionAnimationPreferences.defaultStrongStyle
+    }
+
+    private var strongAttentionSoundEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { resolvedStrongAttentionSoundEnabled },
+            set: { strongAttentionAnimationSoundEnabledStored = $0 }
+        )
+    }
+
+    private var resolvedStrongAttentionSoundEnabled: Bool {
+        AttentionAnimationPreferences.resolvedSoundEnabled()
+    }
+
+    private var strongAttentionSoundCadenceBinding: Binding<AttentionReminderSoundCadence> {
+        Binding(
+            get: { selectedStrongAttentionSoundCadence },
+            set: { strongAttentionAnimationSoundCadenceRawValue = $0.rawValue }
+        )
+    }
+
+    private var selectedStrongAttentionSoundCadence: AttentionReminderSoundCadence {
+        AttentionReminderSoundCadence(rawValue: strongAttentionAnimationSoundCadenceRawValue) ?? AttentionAnimationPreferences.defaultSoundCadence
     }
 }
 

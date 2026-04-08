@@ -47,10 +47,57 @@ enum AttentionAnimationVariant: String, CaseIterable, Identifiable {
     }
 }
 
+enum AttentionReminderSoundCadence: String, CaseIterable, Identifiable {
+    case everyCycle
+    case everyTwoCycles
+    case everyThreeCycles
+    case everyFourCycles
+
+    var id: String { rawValue }
+
+    var cycleMultiplier: Int {
+        switch self {
+        case .everyCycle:
+            return 1
+        case .everyTwoCycles:
+            return 2
+        case .everyThreeCycles:
+            return 3
+        case .everyFourCycles:
+            return 4
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .everyCycle:
+            return "每轮"
+        case .everyTwoCycles:
+            return "每 2 轮"
+        case .everyThreeCycles:
+            return "每 3 轮"
+        case .everyFourCycles:
+            return "每 4 轮"
+        }
+    }
+
+    var settingsSummary: String {
+        "每 \(cycleMultiplier) 轮强提醒动画播放一次声音"
+    }
+
+    var interval: TimeInterval {
+        AttentionAnimationPreferences.cycleDuration * Double(cycleMultiplier)
+    }
+}
+
 enum AttentionAnimationPreferences {
     static let strongEnabledKey = "vibepet.strongAttentionAnimationEnabled"
     static let styleKey = "vibepet.strongAttentionAnimationStyle"
+    static let soundEnabledKey = "vibepet.strongAttentionAnimationSoundEnabled"
+    static let soundCadenceKey = "vibepet.strongAttentionAnimationSoundCadence"
     static let defaultStrongStyle: AttentionAnimationVariant = .urgentPulse
+    static let defaultSoundCadence: AttentionReminderSoundCadence = .everyCycle
+    static let cycleDuration: TimeInterval = 1.5
 
     static func resolvedVariant(defaults: UserDefaults = .standard) -> AttentionAnimationVariant {
         resolvedVariant(
@@ -62,5 +109,19 @@ enum AttentionAnimationPreferences {
     static func resolvedVariant(strongEnabled: Bool, styleRawValue: String?) -> AttentionAnimationVariant {
         guard strongEnabled else { return .subtle }
         return AttentionAnimationVariant(rawValue: styleRawValue ?? "") ?? defaultStrongStyle
+    }
+
+    static func resolvedSoundEnabled(defaults: UserDefaults = .standard) -> Bool {
+        if defaults.object(forKey: soundEnabledKey) != nil {
+            return defaults.bool(forKey: soundEnabledKey)
+        }
+        if defaults.object(forKey: "vibepet.soundEnabled") != nil {
+            return defaults.bool(forKey: "vibepet.soundEnabled")
+        }
+        return true
+    }
+
+    static func resolvedSoundCadence(defaults: UserDefaults = .standard) -> AttentionReminderSoundCadence {
+        AttentionReminderSoundCadence(rawValue: defaults.string(forKey: soundCadenceKey) ?? "") ?? defaultSoundCadence
     }
 }
