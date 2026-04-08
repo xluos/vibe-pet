@@ -19,30 +19,30 @@ enum AttentionAnimationVariant: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .subtle:
-            return "Default"
+            return L10n.tr("attention.variant.subtle.name")
         case .urgentPulse:
-            return "Urgent Pulse"
+            return L10n.tr("attention.variant.urgentPulse.name")
         case .goldenAlert:
-            return "Golden Alert"
+            return L10n.tr("attention.variant.goldenAlert.name")
         case .hyperRipple:
-            return "Hyper Ripple"
+            return L10n.tr("attention.variant.hyperRipple.name")
         case .attentionShake:
-            return "Attention Shake"
+            return L10n.tr("attention.variant.attentionShake.name")
         }
     }
 
     var settingsSummary: String {
         switch self {
         case .subtle:
-            return "低干扰的默认提醒"
+            return L10n.tr("attention.variant.subtle.summary")
         case .urgentPulse:
-            return "双击脉冲，主体和外圈同步强调"
+            return L10n.tr("attention.variant.urgentPulse.summary")
         case .goldenAlert:
-            return "高优先级单次爆发，边框与扩散同时放大"
+            return L10n.tr("attention.variant.goldenAlert.summary")
         case .hyperRipple:
-            return "连续波纹，不断向外扩散"
+            return L10n.tr("attention.variant.hyperRipple.summary")
         case .attentionShake:
-            return "抖动配合高亮，更像强制提醒"
+            return L10n.tr("attention.variant.attentionShake.summary")
         }
     }
 }
@@ -71,18 +71,18 @@ enum AttentionReminderSoundCadence: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .everyCycle:
-            return "每轮"
+            return L10n.tr("attention.cadence.everyCycle.name")
         case .everyTwoCycles:
-            return "每 2 轮"
+            return L10n.tr("attention.cadence.everyTwoCycles.name")
         case .everyThreeCycles:
-            return "每 3 轮"
+            return L10n.tr("attention.cadence.everyThreeCycles.name")
         case .everyFourCycles:
-            return "每 4 轮"
+            return L10n.tr("attention.cadence.everyFourCycles.name")
         }
     }
 
     var settingsSummary: String {
-        "每 \(cycleMultiplier) 轮强提醒动画播放一次声音"
+        L10n.tr("attention.cadence.summary", cycleMultiplier)
     }
 
     var interval: TimeInterval {

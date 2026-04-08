@@ -17,7 +17,7 @@ class SettingsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "VibePet Settings"
+        window.title = L10n.tr("settings.windowTitle")
         window.center()
         window.isReleasedWhenClosed = false
 
@@ -56,7 +56,7 @@ struct SettingsWindowView: View {
                     Image(systemName: "cat")
                         .font(.system(size: 36))
                         .foregroundColor(.orange)
-                    Text("VibePet")
+                    Text(L10n.tr("app.name"))
                         .font(.system(size: 20, weight: .bold, design: .rounded))
                         .foregroundColor(.primary)
                     Text("v1.0.0")
@@ -67,76 +67,76 @@ struct SettingsWindowView: View {
                 .padding(.bottom, 4)
 
                 // Sound
-                settingsSection("Sound") {
-                    settingsToggleRow("Notification sounds", icon: "speaker.wave.2", iconColor: .blue, isOn: $soundEnabled)
+                settingsSection(L10n.tr("settings.section.sound")) {
+                    settingsToggleRow(L10n.tr("settings.notificationSounds"), icon: "speaker.wave.2", iconColor: .blue, isOn: $soundEnabled)
                     if soundEnabled {
                         Divider().padding(.leading, 40)
-                        settingsSliderRow("Volume", icon: "speaker", iconColor: .blue, value: $soundVolume)
+                        settingsSliderRow(L10n.tr("settings.volume"), icon: "speaker", iconColor: .blue, value: $soundVolume)
                     }
                 }
 
                 // General
-                settingsSection("General") {
-                    settingsToggleRow("Launch at login", icon: "power", iconColor: .green, isOn: $launchAtLogin)
+                settingsSection(L10n.tr("settings.section.general")) {
+                    settingsToggleRow(L10n.tr("settings.launchAtLogin"), icon: "power", iconColor: .green, isOn: $launchAtLogin)
                 }
 
-                settingsSection("Display") {
-                    settingsDisplayPickerRow("Pinned display", icon: "display.2", iconColor: .indigo)
+                settingsSection(L10n.tr("settings.section.display")) {
+                    settingsDisplayPickerRow(L10n.tr("settings.pinnedDisplay"), icon: "display.2", iconColor: .indigo)
                 }
 
-                settingsSection("Attention") {
-                    settingsToggleRow("Strong attention animation", icon: "sparkles", iconColor: .pink, isOn: $strongAttentionAnimationEnabled)
+                settingsSection(L10n.tr("settings.section.attention")) {
+                    settingsToggleRow(L10n.tr("settings.strongAttentionAnimation"), icon: "sparkles", iconColor: .pink, isOn: $strongAttentionAnimationEnabled)
                     if strongAttentionAnimationEnabled {
                         Divider().padding(.leading, 40)
-                        settingsAttentionPickerRow("Animation style", icon: "waveform.path.ecg", iconColor: .pink)
+                        settingsAttentionPickerRow(L10n.tr("settings.animationStyle"), icon: "waveform.path.ecg", iconColor: .pink)
                         Divider().padding(.leading, 40)
-                        settingsInfoRow("Effect", icon: "wand.and.stars", iconColor: .pink, value: selectedStrongAttentionAnimationStyle.settingsSummary)
+                        settingsInfoRow(L10n.tr("settings.effect"), icon: "wand.and.stars", iconColor: .pink, value: selectedStrongAttentionAnimationStyle.settingsSummary)
                         Divider().padding(.leading, 40)
-                        settingsToggleRow("Reminder sound", icon: "bell.badge", iconColor: .orange, isOn: strongAttentionSoundEnabledBinding)
+                        settingsToggleRow(L10n.tr("settings.reminderSound"), icon: "bell.badge", iconColor: .orange, isOn: strongAttentionSoundEnabledBinding)
                         if resolvedStrongAttentionSoundEnabled {
                             Divider().padding(.leading, 40)
-                            settingsAttentionSoundCadenceRow("Sound cadence", icon: "metronome", iconColor: .orange)
+                            settingsAttentionSoundCadenceRow(L10n.tr("settings.soundCadence"), icon: "metronome", iconColor: .orange)
                             Divider().padding(.leading, 40)
-                            settingsInfoRow("Cadence", icon: "timer", iconColor: .orange, value: selectedStrongAttentionSoundCadence.settingsSummary)
+                            settingsInfoRow(L10n.tr("settings.cadence"), icon: "timer", iconColor: .orange, value: selectedStrongAttentionSoundCadence.settingsSummary)
                         }
                     } else {
                         Divider().padding(.leading, 40)
-                        settingsInfoRow("Effect", icon: "wand.and.stars", iconColor: .gray, value: "关闭后使用默认弱提醒动画")
+                        settingsInfoRow(L10n.tr("settings.effect"), icon: "wand.and.stars", iconColor: .gray, value: L10n.tr("settings.attentionDisabledHint"))
                     }
                     Divider().padding(.leading, 40)
-                    settingsToggleRow("Mouse cat", icon: "cat", iconColor: .mint, isOn: $mouseCompanionCatEnabled)
+                    settingsToggleRow(L10n.tr("settings.mouseCat"), icon: "cat", iconColor: .mint, isOn: $mouseCompanionCatEnabled)
                     Divider().padding(.leading, 40)
-                    settingsToggleRow("Speech bubble", icon: "text.bubble", iconColor: .mint, isOn: $mouseCompanionBubbleEnabled)
+                    settingsToggleRow(L10n.tr("settings.speechBubble"), icon: "text.bubble", iconColor: .mint, isOn: $mouseCompanionBubbleEnabled)
                     Divider().padding(.leading, 40)
-                    settingsToggleRow("Shake to dismiss", icon: "hand.draw", iconColor: .mint, isOn: $mouseCompanionShakeDismissEnabled)
+                    settingsToggleRow(L10n.tr("settings.shakeToDismiss"), icon: "hand.draw", iconColor: .mint, isOn: $mouseCompanionShakeDismissEnabled)
                     if mouseCompanionShakeDismissEnabled {
                         Divider().padding(.leading, 40)
-                        settingsShakePresetRow("Shake sensitivity", icon: "dial.medium", iconColor: .mint)
+                        settingsShakePresetRow(L10n.tr("settings.shakeSensitivity"), icon: "dial.medium", iconColor: .mint)
                         Divider().padding(.leading, 40)
                         settingsNumericSliderRow(
-                            "Min shake distance",
+                            L10n.tr("settings.minShakeDistance"),
                             icon: "arrow.left.and.right",
                             iconColor: .mint,
                             value: $mouseCompanionShakeMinimumDistance,
                             in: 8...60,
                             step: 1,
-                            valueFormatter: { "\(Int($0)) px" }
+                            valueFormatter: { L10n.tr("unit.px", Int($0)) }
                         )
                         Divider().padding(.leading, 40)
                         settingsNumericSliderRow(
-                            "Min shake speed",
+                            L10n.tr("settings.minShakeSpeed"),
                             icon: "speedometer",
                             iconColor: .mint,
                             value: $mouseCompanionShakeMinimumSpeed,
                             in: 600...3000,
                             step: 50,
-                            valueFormatter: { "\(Int($0)) px/s" }
+                            valueFormatter: { L10n.tr("unit.pxPerSecond", Int($0)) }
                         )
                     }
                 }
 
                 // Hooks
-                settingsSection("Hooks") {
+                settingsSection(L10n.tr("settings.section.hooks")) {
                     settingsInfoRow("Claude Code", icon: "c.circle.fill", iconColor: .orange, value: hookStatus(for: "claude"))
                     Divider().padding(.leading, 40)
                     settingsInfoRow("Codex CLI", icon: "x.circle.fill", iconColor: .green, value: hookStatus(for: "codex"))
@@ -145,18 +145,18 @@ struct SettingsWindowView: View {
                 }
 
                 // Data
-                settingsSection("Data") {
-                    settingsInfoRow("Sessions file", icon: "doc", iconColor: .gray, value: "~/.vibe-pet/sessions.json")
+                settingsSection(L10n.tr("settings.section.data")) {
+                    settingsInfoRow(L10n.tr("settings.sessionsFile"), icon: "doc", iconColor: .gray, value: "~/.vibe-pet/sessions.json")
                     Divider().padding(.leading, 40)
-                    settingsButtonRow("Reinstall hooks", icon: "arrow.triangle.2.circlepath", iconColor: .blue) {
+                    settingsButtonRow(L10n.tr("settings.reinstallHooks"), icon: "arrow.triangle.2.circlepath", iconColor: .blue) {
                         HookInstaller().installAll()
                     }
                     Divider().padding(.leading, 40)
-                    settingsButtonRow("Uninstall hooks", icon: "xmark.circle", iconColor: .red) {
+                    settingsButtonRow(L10n.tr("settings.uninstallHooks"), icon: "xmark.circle", iconColor: .red) {
                         HookInstaller().uninstallAll()
                     }
                     Divider().padding(.leading, 40)
-                    settingsButtonRow("Open data folder", icon: "folder", iconColor: .blue) {
+                    settingsButtonRow(L10n.tr("settings.openDataFolder"), icon: "folder", iconColor: .blue) {
                         let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".vibe-pet")
                         NSWorkspace.shared.open(url)
                     }
@@ -166,7 +166,7 @@ struct SettingsWindowView: View {
                 Button(action: { NSApplication.shared.terminate(nil) }) {
                     HStack {
                         Image(systemName: "power")
-                        Text("Quit VibePet")
+                        Text(L10n.tr("settings.quit"))
                     }
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.red)
@@ -235,9 +235,9 @@ struct SettingsWindowView: View {
                 .foregroundColor(.primary)
             Spacer()
             HStack(spacing: 6) {
-                shakePresetButton("低", distance: 18, speed: 1300)
-                shakePresetButton("中", distance: 22, speed: 1650)
-                shakePresetButton("高", distance: 30, speed: 2200)
+                shakePresetButton(L10n.tr("settings.shakePreset.low"), distance: 18, speed: 1300)
+                shakePresetButton(L10n.tr("settings.shakePreset.medium"), distance: 22, speed: 1650)
+                shakePresetButton(L10n.tr("settings.shakePreset.high"), distance: 30, speed: 2200)
             }
         }
         .frame(height: 32)
@@ -317,7 +317,7 @@ struct SettingsWindowView: View {
                 .foregroundColor(.primary)
             Spacer()
             Picker("", selection: $lockedDisplayID) {
-                Text("Built-in display (Default)")
+                Text(L10n.tr("settings.builtinDisplayDefault"))
                     .tag("")
                 ForEach(displayOptions) { option in
                     Text(option.name)
@@ -386,13 +386,13 @@ struct SettingsWindowView: View {
         case "claude": path = "\(home)/.claude/settings.json"
         case "codex": path = "\(home)/.codex/hooks.json"
         case "coco": path = "\(home)/.trae/traecli.yaml"
-        default: return "Unknown"
+        default: return L10n.tr("settings.unknown")
         }
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
               let str = String(data: data, encoding: .utf8) else {
-            return "Not configured"
+            return L10n.tr("settings.notConfigured")
         }
-        return str.contains("vibe-pet-bridge") ? "Active" : "Not configured"
+        return str.contains("vibe-pet-bridge") ? L10n.tr("settings.active") : L10n.tr("settings.notConfigured")
     }
 
     private func reloadDisplays() {

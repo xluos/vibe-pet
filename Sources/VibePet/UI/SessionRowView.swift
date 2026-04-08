@@ -146,16 +146,16 @@ struct SessionRowView: View {
 
     private var statusLabel: String {
         switch session.status {
-        case .starting: return "starting..."
+        case .starting: return L10n.tr("session.status.starting")
         case .active:
             if let tool = session.lastToolName {
-                return "using \(tool)"
+                return L10n.tr("session.status.usingTool", tool)
             }
-            return "working..."
-        case .waitingForInput: return "waiting for input"
-        case .needsApproval: return "needs approval!"
-        case .ended: return "ended"
-        case .archived: return "archived"
+            return L10n.tr("session.status.working")
+        case .waitingForInput: return L10n.tr("session.status.waitingForInput")
+        case .needsApproval: return L10n.tr("session.status.needsApproval")
+        case .ended: return L10n.tr("session.status.ended")
+        case .archived: return L10n.tr("session.status.archived")
         }
     }
 

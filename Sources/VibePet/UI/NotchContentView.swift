@@ -277,7 +277,7 @@ struct NotchContentView: View {
             PetView(state: derivePetState())
                 .frame(width: 24, height: 24)
 
-            Text("VibePet")
+            Text(L10n.tr("app.name"))
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundColor(.white)
 
@@ -312,7 +312,7 @@ struct NotchContentView: View {
     private var sessionList: some View {
         Group {
             if sessionStore.allSessions.isEmpty {
-                Text("No active sessions")
+                Text(L10n.tr("notch.noActiveSessions"))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(Color.white.opacity(0.35))
                     .padding(.vertical, 16)

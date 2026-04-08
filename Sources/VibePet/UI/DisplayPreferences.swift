@@ -79,7 +79,7 @@ extension NSScreen {
 
     func displayName(index: Int) -> String {
         if isBuiltInDisplay {
-            return "MacBook 内建屏"
+            return L10n.tr("display.builtin")
         }
 
         let baseName = localizedName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -87,6 +87,6 @@ extension NSScreen {
             return baseName
         }
 
-        return "外接显示器 \(index + 1)"
+        return L10n.tr("display.external.indexed", index + 1)
     }
 }

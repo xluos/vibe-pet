@@ -548,15 +548,15 @@ class NotchWindowController: NSWindowController {
 
     private var mouseCompanionMessage: String {
         guard let session = sessionStore.primaryAttentionSession else {
-            return "提醒"
+            return L10n.tr("mouseCompanion.reminder")
         }
         if session.status == .needsApproval {
-            return "待确认"
+            return L10n.tr("mouseCompanion.needsApproval")
         }
         if session.status == .waitingForInput {
-            return "待回复"
+            return L10n.tr("mouseCompanion.waitingInput")
         }
-        return "提醒"
+        return L10n.tr("mouseCompanion.reminder")
     }
 
     private var mouseCompanionShowsCat: Bool {
