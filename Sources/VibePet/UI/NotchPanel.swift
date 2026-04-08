@@ -213,6 +213,8 @@ class NotchWindowController: NSWindowController {
         collapsedWidth = nextMetrics.collapsedWidth
         collapsedHeight = nextMetrics.collapsedHeight
         expandedWidth = nextMetrics.expandedWidth
+        viewModel?.notchWidth = nextMetrics.collapsedWidth
+        viewModel?.notchHeight = nextMetrics.collapsedHeight
     }
 
     private func setupHaloWindow(relativeTo panel: NSPanel) {
@@ -240,7 +242,8 @@ class NotchWindowController: NSWindowController {
                 sideInset: haloSideInset,
                 topInset: haloTopInset,
                 bottomInset: haloBottomInset,
-                color: attentionGlowColor
+                color: attentionGlowColor,
+                variant: AttentionAnimationPreferences.resolvedVariant()
             )
         )
         hosting.frame = NSRect(origin: .zero, size: frame.size)
@@ -275,7 +278,8 @@ class NotchWindowController: NSWindowController {
                 sideInset: self.haloSideInset,
                 topInset: self.haloTopInset,
                 bottomInset: self.haloBottomInset,
-                color: self.attentionGlowColor
+                color: self.attentionGlowColor,
+                variant: AttentionAnimationPreferences.resolvedVariant()
             )
             self.haloHostingView?.frame = NSRect(origin: .zero, size: frame.size)
 
@@ -335,8 +339,8 @@ class NotchWindowController: NSWindowController {
 @Observable
 class NotchViewModel {
     let sessionStore: SessionStore
-    let notchWidth: CGFloat
-    let notchHeight: CGFloat
+    var notchWidth: CGFloat
+    var notchHeight: CGFloat
     let onSessionClick: (Session) -> Void
     let onQuit: () -> Void
     var isExpanded: Bool = false

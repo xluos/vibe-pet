@@ -12,7 +12,7 @@ class SettingsWindowController: NSWindowController {
         }
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 560),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -37,6 +37,8 @@ struct SettingsWindowView: View {
     @AppStorage("vibepet.launchAtLogin") private var launchAtLogin = false
     @AppStorage("vibepet.soundVolume") private var soundVolume = 0.5
     @AppStorage(DisplayPreferences.lockedDisplayIDKey) private var lockedDisplayID = ""
+    @AppStorage(AttentionAnimationPreferences.strongEnabledKey) private var strongAttentionAnimationEnabled = false
+    @AppStorage(AttentionAnimationPreferences.styleKey) private var strongAttentionAnimationStyleRawValue = AttentionAnimationPreferences.defaultStrongStyle.rawValue
     @State private var displayOptions = DisplayPreferences.availableDisplays()
 
     var body: some View {
@@ -73,6 +75,19 @@ struct SettingsWindowView: View {
 
                 settingsSection("Display") {
                     settingsDisplayPickerRow("Pinned display", icon: "display.2", iconColor: .indigo)
+                }
+
+                settingsSection("Attention") {
+                    settingsToggleRow("Strong attention animation", icon: "sparkles", iconColor: .pink, isOn: $strongAttentionAnimationEnabled)
+                    if strongAttentionAnimationEnabled {
+                        Divider().padding(.leading, 40)
+                        settingsAttentionPickerRow("Animation style", icon: "waveform.path.ecg", iconColor: .pink)
+                        Divider().padding(.leading, 40)
+                        settingsInfoRow("Effect", icon: "wand.and.stars", iconColor: .pink, value: selectedStrongAttentionAnimationStyle.settingsSummary)
+                    } else {
+                        Divider().padding(.leading, 40)
+                        settingsInfoRow("Effect", icon: "wand.and.stars", iconColor: .gray, value: "关闭后使用默认弱提醒动画")
+                    }
                 }
 
                 // Hooks
@@ -122,7 +137,7 @@ struct SettingsWindowView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
         }
-        .frame(width: 420, height: 480)
+        .frame(width: 420, height: 560)
         .onAppear(perform: reloadDisplays)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
             reloadDisplays()
@@ -220,6 +235,25 @@ struct SettingsWindowView: View {
         .frame(height: 32)
     }
 
+    private func settingsAttentionPickerRow(_ label: String, icon: String, iconColor: Color) -> some View {
+        HStack(spacing: 10) {
+            iconBadge(icon, color: iconColor)
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundColor(.primary)
+            Spacer()
+            Picker("", selection: strongAttentionAnimationStyleBinding) {
+                ForEach(AttentionAnimationVariant.strongOptions) { option in
+                    Text(option.displayName)
+                        .tag(option)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 190)
+        }
+        .frame(height: 32)
+    }
+
     private func iconBadge(_ name: String, color: Color) -> some View {
         Image(systemName: name)
             .font(.system(size: 12, weight: .medium))
@@ -252,6 +286,17 @@ struct SettingsWindowView: View {
         if !lockedDisplayID.isEmpty && !displayOptions.contains(where: { $0.id == lockedDisplayID }) {
             lockedDisplayID = ""
         }
+    }
+
+    private var strongAttentionAnimationStyleBinding: Binding<AttentionAnimationVariant> {
+        Binding(
+            get: { selectedStrongAttentionAnimationStyle },
+            set: { strongAttentionAnimationStyleRawValue = $0.rawValue }
+        )
+    }
+
+    private var selectedStrongAttentionAnimationStyle: AttentionAnimationVariant {
+        AttentionAnimationVariant(rawValue: strongAttentionAnimationStyleRawValue) ?? AttentionAnimationPreferences.defaultStrongStyle
     }
 }
 
