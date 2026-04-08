@@ -67,7 +67,6 @@ final class AttentionReminderCoordinator {
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.pendingStartWorkItem = nil
-            self.playAlignedPulse()
 
             let timer = Timer(timeInterval: cadence.interval, repeats: true) { [weak self] _ in
                 self?.playAlignedPulse()
