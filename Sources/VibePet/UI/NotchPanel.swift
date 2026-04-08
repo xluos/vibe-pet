@@ -65,10 +65,8 @@ class NotchWindowController: NSWindowController {
     required init?(coder: NSCoder) { fatalError() }
 
     private static func targetScreen() -> NSScreen {
-        if let main = NSScreen.main {
-            return main
-        }
-        return NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 })
+        NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 })
+            ?? NSScreen.main
             ?? NSScreen.screens[0]
     }
 
@@ -90,7 +88,7 @@ class NotchWindowController: NSWindowController {
         }
         let hasNotch = safe.top > 0 && notchWidth > 0
         let collapsedWidth = hasNotch ? (notchWidth + sidePadding * 2) : 220
-        let collapsedHeight = menuBarHeight + 1
+        let collapsedHeight = hasNotch ? menuBarHeight + 1 : menuBarHeight
         let expandedWidth = max(collapsedWidth + 80, 340)
         return (collapsedWidth, collapsedHeight, expandedWidth)
     }
