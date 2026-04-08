@@ -8,6 +8,9 @@ class NotchWindowController: NSWindowController {
     private var viewModel: NotchViewModel?
     private var haloPanel: NSPanel?
     private var haloHostingView: NSHostingView<AttentionHaloRootView>?
+    private var mouseCompanionPanel: NSPanel?
+    private var mouseCompanionHostingView: NSHostingView<MouseCompanionRootView>?
+    private var mouseTrackingTimer: Timer?
 
     private var collapsedWidth: CGFloat = 260
     private var collapsedHeight: CGFloat = 33
@@ -19,6 +22,8 @@ class NotchWindowController: NSWindowController {
     private let haloSideInset: CGFloat = 180
     private let haloTopInset: CGFloat = 20
     private let haloBottomInset: CGFloat = 72
+    private let mouseCompanionSize = CGSize(width: 96, height: 68)
+    private let mouseCompanionOffset = CGPoint(x: 14, y: 24)
 
     init(sessionStore: SessionStore) {
         self.sessionStore = sessionStore
@@ -94,6 +99,7 @@ class NotchWindowController: NSWindowController {
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+        mouseTrackingTimer?.invalidate()
     }
 
     private func setupContent() {
@@ -115,6 +121,8 @@ class NotchWindowController: NSWindowController {
 
         setupHaloWindow(relativeTo: panel)
         updateAttentionHalo(relativeTo: panel)
+        setupMouseCompanionWindow(relativeTo: panel)
+        updateMouseCompanion()
     }
 
     func toggleExpanded() {
@@ -138,6 +146,7 @@ class NotchWindowController: NSWindowController {
 
         repositionPanel(panel, width: w, height: height)
         updateAttentionHalo(relativeTo: panel)
+        updateMouseCompanion()
 
         withAnimation(.easeOut(duration: 0.15)) {
             viewModel.isExpanded = isExpanded
@@ -154,6 +163,7 @@ class NotchWindowController: NSWindowController {
 
         repositionPanel(panel, width: w, height: height)
         updateAttentionHalo(relativeTo: panel)
+        updateMouseCompanion()
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -177,6 +187,7 @@ class NotchWindowController: NSWindowController {
         let height = panel.frame.height
         repositionPanel(panel, width: width, height: height)
         updateAttentionHalo(relativeTo: panel)
+        updateMouseCompanion()
     }
 
     @objc
@@ -186,12 +197,14 @@ class NotchWindowController: NSWindowController {
         refreshMetrics(for: screen)
         repositionPanel(panel, width: isExpanded ? expandedWidth : collapsedWidth, height: panel.frame.height)
         updateAttentionHalo(relativeTo: panel)
+        updateMouseCompanion()
     }
 
     @objc
     private func handleSessionStatusChanged() {
         guard let panel = window as? NSPanel else { return }
         updateAttentionHalo(relativeTo: panel)
+        updateMouseCompanion()
     }
 
     private func repositionPanel(_ panel: NSPanel, width: CGFloat, height: CGFloat) {
@@ -291,6 +304,94 @@ class NotchWindowController: NSWindowController {
         }
     }
 
+    private func setupMouseCompanionWindow(relativeTo panel: NSPanel) {
+        guard mouseCompanionPanel == nil else { return }
+
+        let companion = NSPanel(
+            contentRect: mouseCompanionFrame(),
+            styleMask: [.nonactivatingPanel, .borderless],
+            backing: .buffered,
+            defer: false
+        )
+        companion.level = panel.level
+        companion.isOpaque = false
+        companion.backgroundColor = .clear
+        companion.hasShadow = false
+        companion.collectionBehavior = panel.collectionBehavior
+        companion.hidesOnDeactivate = false
+        companion.ignoresMouseEvents = true
+
+        let hosting = NSHostingView(
+            rootView: MouseCompanionRootView(
+                petState: .needsAttention,
+                color: attentionGlowColor,
+                message: mouseCompanionMessage,
+                showsCat: mouseCompanionShowsCat,
+                showsBubble: mouseCompanionShowsBubble
+            )
+        )
+        hosting.frame = NSRect(origin: .zero, size: mouseCompanionSize)
+        hosting.autoresizingMask = [.width, .height]
+        companion.contentView?.addSubview(hosting)
+
+        self.mouseCompanionPanel = companion
+        self.mouseCompanionHostingView = hosting
+        companion.orderOut(nil)
+    }
+
+    private func updateMouseCompanion() {
+        let shouldShowCompanion = sessionStore.hasSessionNeedingAttention
+            && (mouseCompanionShowsCat || mouseCompanionShowsBubble)
+
+        guard let companion = mouseCompanionPanel else { return }
+
+        if !shouldShowCompanion {
+            mouseTrackingTimer?.invalidate()
+            mouseTrackingTimer = nil
+            companion.orderOut(nil)
+            return
+        }
+
+        mouseCompanionHostingView?.rootView = MouseCompanionRootView(
+            petState: .needsAttention,
+            color: attentionGlowColor,
+            message: mouseCompanionMessage,
+            showsCat: mouseCompanionShowsCat,
+            showsBubble: mouseCompanionShowsBubble
+        )
+        repositionMouseCompanion()
+
+        if mouseTrackingTimer == nil {
+            let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+                self?.repositionMouseCompanion()
+            }
+            mouseTrackingTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
+        }
+
+        companion.orderFront(nil)
+    }
+
+    private func repositionMouseCompanion() {
+        guard let companion = mouseCompanionPanel else { return }
+        companion.setFrame(mouseCompanionFrame(), display: false)
+    }
+
+    private func mouseCompanionFrame() -> NSRect {
+        let mouseLocation = NSEvent.mouseLocation
+        let targetScreen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) })
+            ?? DisplayPreferences.resolvedScreen()
+        let visibleFrame = targetScreen.visibleFrame
+
+        var originX = mouseLocation.x + mouseCompanionOffset.x
+        var originY = mouseLocation.y + mouseCompanionOffset.y - 32
+
+        originX = min(max(originX, visibleFrame.minX), visibleFrame.maxX - mouseCompanionSize.width)
+        originY = min(max(originY, visibleFrame.minY), visibleFrame.maxY - mouseCompanionSize.height)
+
+        return NSRect(origin: CGPoint(x: originX, y: originY), size: mouseCompanionSize)
+    }
+
     private func haloFrame(relativeTo panelFrame: NSRect) -> NSRect {
         NSRect(
             x: panelFrame.minX - haloSideInset,
@@ -305,6 +406,24 @@ class NotchWindowController: NSWindowController {
             return Color(red: 1.0, green: 0.22, blue: 0.18)
         }
         return Color(red: 1.0, green: 0.74, blue: 0.08)
+    }
+
+    private var mouseCompanionMessage: String {
+        if sessionStore.sessions.values.contains(where: { $0.status == .needsApproval }) {
+            return "待确认"
+        }
+        if sessionStore.sessions.values.contains(where: { $0.status == .waitingForInput }) {
+            return "待回复"
+        }
+        return "提醒"
+    }
+
+    private var mouseCompanionShowsCat: Bool {
+        AttentionAnimationPreferences.resolvedMouseCompanionCatEnabled()
+    }
+
+    private var mouseCompanionShowsBubble: Bool {
+        AttentionAnimationPreferences.resolvedMouseCompanionBubbleEnabled()
     }
 
     private static func metrics(
@@ -333,6 +452,182 @@ class NotchWindowController: NSWindowController {
         }
 
         return (collapsedWidth, collapsedHeight, expandedWidth)
+    }
+}
+
+private struct MouseCompanionRootView: View {
+    let petState: PetState
+    let color: Color
+    let message: String
+    let showsCat: Bool
+    let showsBubble: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
+            let phase = pulsePhase(for: context.date)
+            ZStack(alignment: .topLeading) {
+                if showsBubble {
+                    bubble(phase: phase, showsArrow: showsCat)
+                        .offset(x: showsCat ? 20 : 8, y: showsCat ? 2 : 10)
+                }
+
+                if showsCat {
+                    catBadge(phase: phase)
+                        .offset(x: showsBubble ? 8 : 14, y: showsBubble ? 28 : 18)
+                }
+            }
+            .frame(width: 96, height: 68, alignment: .topLeading)
+            .background(Color.clear)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func bubble(phase: MouseCompanionPhase, showsArrow: Bool) -> some View {
+        let bubbleShape = PixelSpeechBubbleShape(showsArrow: showsArrow)
+
+        return Text(message)
+            .font(.system(size: 8, weight: .bold, design: .monospaced))
+            .foregroundColor(.black.opacity(0.92))
+            .padding(.leading, 5)
+            .padding(.trailing, 6)
+            .padding(.top, 5)
+            .padding(.bottom, showsArrow ? 10 : 5)
+            .background {
+                bubbleShape
+                    .fill(Color.white.opacity(0.985))
+                    .overlay {
+                        bubbleShape
+                            .stroke(Color.black.opacity(0.92), lineWidth: 1)
+                    }
+                    .overlay {
+                        bubbleShape
+                            .fill(Color.white.opacity(0.12 + phase.flash * 0.04))
+                            .padding(2)
+                    }
+            }
+            .fixedSize()
+            .shadow(color: color.opacity(0.14 + phase.glow * 0.1), radius: 3, y: 1)
+            .scaleEffect(0.99 + phase.beat * 0.025, anchor: .bottomLeading)
+    }
+
+    private func catBadge(phase: MouseCompanionPhase) -> some View {
+        ZStack {
+            Circle()
+                .fill(glowGradient(phase: phase))
+                .frame(width: 30, height: 30)
+                .scaleEffect(0.92 + phase.expansion * 0.18)
+                .blur(radius: 1.6 + phase.afterglow * 2.4)
+
+            Circle()
+                .stroke(color.opacity(0.25 + phase.flash * 0.45), lineWidth: 1.2)
+                .frame(width: 24 + phase.beat * 4, height: 24 + phase.beat * 4)
+                .blur(radius: phase.beat * 0.6)
+
+            PetView(state: petState)
+                .frame(width: 14, height: 14)
+                .scaleEffect(1.0 + phase.beat * 0.08)
+                .shadow(color: color.opacity(0.5), radius: 6 + phase.glow * 4)
+        }
+    }
+
+    private func glowGradient(phase: MouseCompanionPhase) -> RadialGradient {
+        RadialGradient(
+            colors: [
+                color.opacity(0.34 + phase.glow * 0.16),
+                color.opacity(0.16 + phase.afterglow * 0.18),
+                Color.clear
+            ],
+            center: .center,
+            startRadius: 2,
+            endRadius: 15
+        )
+    }
+
+    private func pulsePhase(for date: Date) -> MouseCompanionPhase {
+        let progress = date.timeIntervalSinceReferenceDate
+            .truncatingRemainder(dividingBy: 1.5) / 1.5
+        let primary = pulse(progress: progress, center: 0.12, width: 0.12)
+        let secondary = pulse(progress: progress, center: 0.32, width: 0.16)
+        let beat = max(primary, secondary * 0.8)
+        let afterglow = max(primary * 0.5, secondary * 0.75)
+        let ambient = (sin(progress * .pi * 2 - (.pi / 2)) + 1) / 2
+        return MouseCompanionPhase(
+            beat: beat,
+            afterglow: afterglow,
+            glow: min(1, beat * 0.85 + afterglow * 0.75 + ambient * 0.15),
+            flash: min(1, beat + afterglow * 0.7),
+            expansion: beat * 0.4 + afterglow * 0.6
+        )
+    }
+
+    private func pulse(progress: Double, center: Double, width: Double) -> Double {
+        let distance = abs(progress - center)
+        guard distance < width else { return 0 }
+
+        let normalized = 1 - (distance / width)
+        return normalized * normalized * (3 - 2 * normalized)
+    }
+}
+
+private struct MouseCompanionPhase {
+    let beat: Double
+    let afterglow: Double
+    let glow: Double
+    let flash: Double
+    let expansion: Double
+}
+
+private struct PixelSpeechBubbleShape: Shape {
+    let showsArrow: Bool
+
+    func path(in rect: CGRect) -> Path {
+        guard showsArrow else {
+            return RoundedRectangle(cornerRadius: 6, style: .continuous).path(in: rect)
+        }
+
+        let arrowHeight: CGFloat = 5
+        let cornerRadius: CGFloat = 6
+        let bodyBottom = rect.maxY - arrowHeight
+        let radius = min(cornerRadius, (bodyBottom - rect.minY) / 2)
+        let arrowTipX = rect.minX + 16
+        let arrowBaseLeft = rect.minX + 22
+        let arrowBaseRight = rect.minX + 34
+
+        var path = Path()
+
+        path.move(to: CGPoint(x: rect.minX + radius, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
+            control: CGPoint(x: rect.maxX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: bodyBottom - radius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX - radius, y: bodyBottom),
+            control: CGPoint(x: rect.maxX, y: bodyBottom)
+        )
+        path.addLine(to: CGPoint(x: arrowBaseRight, y: bodyBottom))
+        path.addQuadCurve(
+            to: CGPoint(x: arrowTipX, y: rect.maxY),
+            control: CGPoint(x: rect.minX + 26, y: bodyBottom + arrowHeight * 0.2)
+        )
+        path.addQuadCurve(
+            to: CGPoint(x: arrowBaseLeft, y: bodyBottom),
+            control: CGPoint(x: rect.minX + 18, y: bodyBottom + arrowHeight * 0.6)
+        )
+        path.addLine(to: CGPoint(x: rect.minX + radius, y: bodyBottom))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX, y: bodyBottom - radius),
+            control: CGPoint(x: rect.minX, y: bodyBottom)
+        )
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + radius, y: rect.minY),
+            control: CGPoint(x: rect.minX, y: rect.minY)
+        )
+        path.closeSubpath()
+
+        return path
     }
 }
 

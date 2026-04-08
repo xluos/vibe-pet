@@ -95,6 +95,8 @@ enum AttentionAnimationPreferences {
     static let styleKey = "vibepet.strongAttentionAnimationStyle"
     static let soundEnabledKey = "vibepet.strongAttentionAnimationSoundEnabled"
     static let soundCadenceKey = "vibepet.strongAttentionAnimationSoundCadence"
+    static let mouseCompanionCatEnabledKey = "vibepet.mouseCompanionCatEnabled"
+    static let mouseCompanionBubbleEnabledKey = "vibepet.mouseCompanionBubbleEnabled"
     static let defaultStrongStyle: AttentionAnimationVariant = .urgentPulse
     static let defaultSoundCadence: AttentionReminderSoundCadence = .everyCycle
     static let cycleDuration: TimeInterval = 1.5
@@ -123,5 +125,19 @@ enum AttentionAnimationPreferences {
 
     static func resolvedSoundCadence(defaults: UserDefaults = .standard) -> AttentionReminderSoundCadence {
         AttentionReminderSoundCadence(rawValue: defaults.string(forKey: soundCadenceKey) ?? "") ?? defaultSoundCadence
+    }
+
+    static func resolvedMouseCompanionCatEnabled(defaults: UserDefaults = .standard) -> Bool {
+        if defaults.object(forKey: mouseCompanionCatEnabledKey) != nil {
+            return defaults.bool(forKey: mouseCompanionCatEnabledKey)
+        }
+        return true
+    }
+
+    static func resolvedMouseCompanionBubbleEnabled(defaults: UserDefaults = .standard) -> Bool {
+        if defaults.object(forKey: mouseCompanionBubbleEnabledKey) != nil {
+            return defaults.bool(forKey: mouseCompanionBubbleEnabledKey)
+        }
+        return true
     }
 }

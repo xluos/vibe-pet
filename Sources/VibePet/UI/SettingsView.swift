@@ -41,6 +41,8 @@ struct SettingsWindowView: View {
     @AppStorage(AttentionAnimationPreferences.styleKey) private var strongAttentionAnimationStyleRawValue = AttentionAnimationPreferences.defaultStrongStyle.rawValue
     @AppStorage(AttentionAnimationPreferences.soundEnabledKey) private var strongAttentionAnimationSoundEnabledStored = true
     @AppStorage(AttentionAnimationPreferences.soundCadenceKey) private var strongAttentionAnimationSoundCadenceRawValue = AttentionAnimationPreferences.defaultSoundCadence.rawValue
+    @AppStorage(AttentionAnimationPreferences.mouseCompanionCatEnabledKey) private var mouseCompanionCatEnabled = true
+    @AppStorage(AttentionAnimationPreferences.mouseCompanionBubbleEnabledKey) private var mouseCompanionBubbleEnabled = true
     @State private var displayOptions = DisplayPreferences.availableDisplays()
 
     var body: some View {
@@ -98,6 +100,10 @@ struct SettingsWindowView: View {
                         Divider().padding(.leading, 40)
                         settingsInfoRow("Effect", icon: "wand.and.stars", iconColor: .gray, value: "关闭后使用默认弱提醒动画")
                     }
+                    Divider().padding(.leading, 40)
+                    settingsToggleRow("Mouse cat", icon: "cat", iconColor: .mint, isOn: $mouseCompanionCatEnabled)
+                    Divider().padding(.leading, 40)
+                    settingsToggleRow("Speech bubble", icon: "text.bubble", iconColor: .mint, isOn: $mouseCompanionBubbleEnabled)
                 }
 
                 // Hooks
