@@ -11,6 +11,13 @@ class NotchWindowController: NSWindowController {
     private var mouseCompanionPanel: NSPanel?
     private var mouseCompanionHostingView: NSHostingView<MouseCompanionRootView>?
     private var mouseTrackingTimer: Timer?
+    private var lastMouseTrackingSample: MouseTrackingSample?
+    private var lastShakeAxis: ShakeAxis?
+    private var lastShakeDirection = 0
+    private var lastShakeDirectionChangeAt: Date?
+    private var recentShakeTurnTimestamps: [Date] = []
+    private var currentShakeTravel: CGFloat = 0
+    private var dismissedMouseCompanionSignature: String?
 
     private var collapsedWidth: CGFloat = 260
     private var collapsedHeight: CGFloat = 33
@@ -23,7 +30,7 @@ class NotchWindowController: NSWindowController {
     private let haloTopInset: CGFloat = 20
     private let haloBottomInset: CGFloat = 72
     private let mouseCompanionSize = CGSize(width: 96, height: 68)
-    private let mouseCompanionOffset = CGPoint(x: 14, y: 24)
+    private let mouseCompanionOffset = CGPoint(x: 10, y: 16)
 
     init(sessionStore: SessionStore) {
         self.sessionStore = sessionStore
@@ -340,7 +347,20 @@ class NotchWindowController: NSWindowController {
     }
 
     private func updateMouseCompanion() {
-        let shouldShowCompanion = sessionStore.hasSessionNeedingAttention
+        let attentionSignature = currentMouseCompanionAttentionSignature
+        if attentionSignature.isEmpty {
+            dismissedMouseCompanionSignature = nil
+            resetMouseShakeTracking()
+        } else if !mouseCompanionShakeDismissEnabled {
+            dismissedMouseCompanionSignature = nil
+            resetMouseShakeTracking()
+        } else if dismissedMouseCompanionSignature != nil && dismissedMouseCompanionSignature != attentionSignature {
+            dismissedMouseCompanionSignature = nil
+            resetMouseShakeTracking()
+        }
+
+        let shouldShowCompanion = !attentionSignature.isEmpty
+            && dismissedMouseCompanionSignature != attentionSignature
             && (mouseCompanionShowsCat || mouseCompanionShowsBubble)
 
         guard let companion = mouseCompanionPanel else { return }
@@ -348,6 +368,7 @@ class NotchWindowController: NSWindowController {
         if !shouldShowCompanion {
             mouseTrackingTimer?.invalidate()
             mouseTrackingTimer = nil
+            lastMouseTrackingSample = nil
             companion.orderOut(nil)
             return
         }
@@ -363,7 +384,7 @@ class NotchWindowController: NSWindowController {
 
         if mouseTrackingTimer == nil {
             let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-                self?.repositionMouseCompanion()
+                self?.handleMouseCompanionTick()
             }
             mouseTrackingTimer = timer
             RunLoop.main.add(timer, forMode: .common)
@@ -372,13 +393,31 @@ class NotchWindowController: NSWindowController {
         companion.orderFront(nil)
     }
 
+    private func handleMouseCompanionTick() {
+        let mouseLocation = NSEvent.mouseLocation
+        if mouseCompanionShakeDismissEnabled {
+            processMouseShakeIfNeeded(at: mouseLocation, now: Date())
+        } else {
+            resetMouseShakeTracking()
+        }
+        repositionMouseCompanion(using: mouseLocation)
+    }
+
     private func repositionMouseCompanion() {
         guard let companion = mouseCompanionPanel else { return }
         companion.setFrame(mouseCompanionFrame(), display: false)
     }
 
+    private func repositionMouseCompanion(using mouseLocation: CGPoint) {
+        guard let companion = mouseCompanionPanel else { return }
+        companion.setFrame(mouseCompanionFrame(for: mouseLocation), display: false)
+    }
+
     private func mouseCompanionFrame() -> NSRect {
-        let mouseLocation = NSEvent.mouseLocation
+        mouseCompanionFrame(for: NSEvent.mouseLocation)
+    }
+
+    private func mouseCompanionFrame(for mouseLocation: CGPoint) -> NSRect {
         let targetScreen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) })
             ?? DisplayPreferences.resolvedScreen()
         let visibleFrame = targetScreen.visibleFrame
@@ -390,6 +429,92 @@ class NotchWindowController: NSWindowController {
         originY = min(max(originY, visibleFrame.minY), visibleFrame.maxY - mouseCompanionSize.height)
 
         return NSRect(origin: CGPoint(x: originX, y: originY), size: mouseCompanionSize)
+    }
+
+    private func processMouseShakeIfNeeded(at location: CGPoint, now: Date) {
+        guard dismissedMouseCompanionSignature == nil else {
+            lastMouseTrackingSample = MouseTrackingSample(location: location, timestamp: now)
+            return
+        }
+
+        defer {
+            lastMouseTrackingSample = MouseTrackingSample(location: location, timestamp: now)
+        }
+
+        guard let previousSample = lastMouseTrackingSample else { return }
+        let dt = now.timeIntervalSince(previousSample.timestamp)
+        guard dt > 0 else { return }
+
+        let dx = location.x - previousSample.location.x
+        let dy = location.y - previousSample.location.y
+        let absDx = abs(dx)
+        let absDy = abs(dy)
+
+        let axis: ShakeAxis
+        let delta: CGFloat
+        let crossDelta: CGFloat
+        if absDx >= absDy {
+            axis = .horizontal
+            delta = dx
+            crossDelta = absDy
+        } else {
+            axis = .vertical
+            delta = dy
+            crossDelta = absDx
+        }
+
+        let magnitude = abs(delta)
+        let speed = magnitude / CGFloat(dt)
+        guard magnitude >= 22 else { return }
+        guard speed >= 1650 else { return }
+        guard magnitude >= crossDelta * 1.5 else { return }
+
+        let direction = delta > 0 ? 1 : -1
+
+        if lastShakeAxis != axis {
+            lastShakeAxis = axis
+            lastShakeDirection = direction
+            lastShakeDirectionChangeAt = now
+            recentShakeTurnTimestamps.removeAll()
+            currentShakeTravel = magnitude
+            return
+        }
+
+        if direction == lastShakeDirection {
+            currentShakeTravel += magnitude
+            lastShakeDirectionChangeAt = now
+            return
+        }
+
+        let changeWindow: TimeInterval = 0.22
+        let minimumLegTravel: CGFloat = 110
+        if currentShakeTravel >= minimumLegTravel,
+           let lastChange = lastShakeDirectionChangeAt,
+           now.timeIntervalSince(lastChange) <= changeWindow {
+            recentShakeTurnTimestamps.append(now)
+            recentShakeTurnTimestamps = recentShakeTurnTimestamps.filter { now.timeIntervalSince($0) <= 0.6 }
+            if recentShakeTurnTimestamps.count >= 2 {
+                dismissedMouseCompanionSignature = currentMouseCompanionAttentionSignature
+                resetMouseShakeTracking()
+                updateMouseCompanion()
+                return
+            }
+        } else {
+            recentShakeTurnTimestamps.removeAll()
+        }
+
+        lastShakeDirection = direction
+        lastShakeDirectionChangeAt = now
+        currentShakeTravel = magnitude
+    }
+
+    private func resetMouseShakeTracking() {
+        lastMouseTrackingSample = nil
+        lastShakeAxis = nil
+        lastShakeDirection = 0
+        lastShakeDirectionChangeAt = nil
+        recentShakeTurnTimestamps.removeAll()
+        currentShakeTravel = 0
     }
 
     private func haloFrame(relativeTo panelFrame: NSRect) -> NSRect {
@@ -426,6 +551,18 @@ class NotchWindowController: NSWindowController {
         AttentionAnimationPreferences.resolvedMouseCompanionBubbleEnabled()
     }
 
+    private var mouseCompanionShakeDismissEnabled: Bool {
+        AttentionAnimationPreferences.resolvedMouseCompanionShakeDismissEnabled()
+    }
+
+    private var currentMouseCompanionAttentionSignature: String {
+        sessionStore.sessions.values
+            .filter { $0.status == .needsApproval || $0.status == .waitingForInput }
+            .map { "\($0.id):\($0.status.rawValue)" }
+            .sorted()
+            .joined(separator: "|")
+    }
+
     private static func metrics(
         for screen: NSScreen,
         collapsedLeftRevealWidth: CGFloat,
@@ -453,6 +590,16 @@ class NotchWindowController: NSWindowController {
 
         return (collapsedWidth, collapsedHeight, expandedWidth)
     }
+}
+
+private struct MouseTrackingSample {
+    let location: CGPoint
+    let timestamp: Date
+}
+
+private enum ShakeAxis {
+    case horizontal
+    case vertical
 }
 
 private struct MouseCompanionRootView: View {

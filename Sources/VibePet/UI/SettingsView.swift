@@ -43,6 +43,7 @@ struct SettingsWindowView: View {
     @AppStorage(AttentionAnimationPreferences.soundCadenceKey) private var strongAttentionAnimationSoundCadenceRawValue = AttentionAnimationPreferences.defaultSoundCadence.rawValue
     @AppStorage(AttentionAnimationPreferences.mouseCompanionCatEnabledKey) private var mouseCompanionCatEnabled = true
     @AppStorage(AttentionAnimationPreferences.mouseCompanionBubbleEnabledKey) private var mouseCompanionBubbleEnabled = true
+    @AppStorage(AttentionAnimationPreferences.mouseCompanionShakeDismissEnabledKey) private var mouseCompanionShakeDismissEnabled = true
     @State private var displayOptions = DisplayPreferences.availableDisplays()
 
     var body: some View {
@@ -104,6 +105,8 @@ struct SettingsWindowView: View {
                     settingsToggleRow("Mouse cat", icon: "cat", iconColor: .mint, isOn: $mouseCompanionCatEnabled)
                     Divider().padding(.leading, 40)
                     settingsToggleRow("Speech bubble", icon: "text.bubble", iconColor: .mint, isOn: $mouseCompanionBubbleEnabled)
+                    Divider().padding(.leading, 40)
+                    settingsToggleRow("Shake to dismiss", icon: "hand.draw", iconColor: .mint, isOn: $mouseCompanionShakeDismissEnabled)
                 }
 
                 // Hooks
