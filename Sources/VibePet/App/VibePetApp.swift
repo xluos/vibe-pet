@@ -16,6 +16,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var sessionStore = SessionStore()
     private var notchPanel: NotchWindowController?
     private var soundObserver: Any?
+    private var localeObserver: Any?
     private let attentionReminderCoordinator = AttentionReminderCoordinator()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -55,6 +56,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        localeObserver = NotificationCenter.default.addObserver(
+            forName: NSLocale.currentLocaleDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            let selectedLanguage = UserDefaults.standard.string(forKey: L10n.languageKey) ?? ""
+            guard selectedLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            NotificationCenter.default.post(name: L10n.languageDidChangeNotification, object: nil)
+        }
+
         // Create notch panel UI
         notchPanel = NotchWindowController(sessionStore: sessionStore)
         notchPanel?.showWindow(nil)
@@ -65,6 +76,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         socketServer?.stop()
         attentionReminderCoordinator.stop()
         if let observer = soundObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = localeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }

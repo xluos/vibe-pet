@@ -4,6 +4,7 @@
 "settings.section.general" = "通用";
 "settings.section.display" = "显示";
 "settings.section.attention" = "提醒";
+"settings.section.mouseCompanion" = "鼠标跟随";
 "settings.section.hooks" = "Hooks";
 "settings.section.data" = "数据";
 "settings.notificationSounds" = "通知音效";
@@ -21,7 +22,7 @@
 "settings.soundCadence" = "播放频率";
 "settings.cadence" = "频率";
 "settings.attentionDisabledHint" = "关闭后使用默认弱提醒动画";
-"settings.mouseCat" = "鼠标跟随猫";
+"settings.mouseCat" = "鼠标跟随";
 "settings.speechBubble" = "气泡提示";
 "settings.shakeToDismiss" = "甩动关闭";
 "settings.shakeSensitivity" = "甩动灵敏度";

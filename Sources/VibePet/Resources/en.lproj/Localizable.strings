@@ -4,6 +4,7 @@
 "settings.section.general" = "General";
 "settings.section.display" = "Display";
 "settings.section.attention" = "Attention";
+"settings.section.mouseCompanion" = "Mouse Companion";
 "settings.section.hooks" = "Hooks";
 "settings.section.data" = "Data";
 "settings.notificationSounds" = "Notification sounds";

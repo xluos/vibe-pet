@@ -94,20 +94,15 @@ struct SettingsWindowView: View {
                         Divider().padding(.leading, 40)
                         settingsAttentionPickerRow(L10n.tr("settings.animationStyle"), icon: "waveform.path.ecg", iconColor: .pink)
                         Divider().padding(.leading, 40)
-                        settingsInfoRow(L10n.tr("settings.effect"), icon: "wand.and.stars", iconColor: .pink, value: selectedStrongAttentionAnimationStyle.settingsSummary)
-                        Divider().padding(.leading, 40)
                         settingsToggleRow(L10n.tr("settings.reminderSound"), icon: "bell.badge", iconColor: .orange, isOn: strongAttentionSoundEnabledBinding)
                         if resolvedStrongAttentionSoundEnabled {
                             Divider().padding(.leading, 40)
                             settingsAttentionSoundCadenceRow(L10n.tr("settings.soundCadence"), icon: "metronome", iconColor: .orange)
-                            Divider().padding(.leading, 40)
-                            settingsInfoRow(L10n.tr("settings.cadence"), icon: "timer", iconColor: .orange, value: selectedStrongAttentionSoundCadence.settingsSummary)
                         }
-                    } else {
-                        Divider().padding(.leading, 40)
-                        settingsInfoRow(L10n.tr("settings.effect"), icon: "wand.and.stars", iconColor: .gray, value: L10n.tr("settings.attentionDisabledHint"))
                     }
-                    Divider().padding(.leading, 40)
+                }
+
+                settingsSection(L10n.tr("settings.section.mouseCompanion")) {
                     settingsToggleRow(L10n.tr("settings.mouseCat"), icon: "cat", iconColor: .mint, isOn: $mouseCompanionCatEnabled)
                     Divider().padding(.leading, 40)
                     settingsToggleRow(L10n.tr("settings.speechBubble"), icon: "text.bubble", iconColor: .mint, isOn: $mouseCompanionBubbleEnabled)
@@ -116,26 +111,6 @@ struct SettingsWindowView: View {
                     if mouseCompanionShakeDismissEnabled {
                         Divider().padding(.leading, 40)
                         settingsShakePresetRow(L10n.tr("settings.shakeSensitivity"), icon: "dial.medium", iconColor: .mint)
-                        Divider().padding(.leading, 40)
-                        settingsNumericSliderRow(
-                            L10n.tr("settings.minShakeDistance"),
-                            icon: "arrow.left.and.right",
-                            iconColor: .mint,
-                            value: $mouseCompanionShakeMinimumDistance,
-                            in: 8...60,
-                            step: 1,
-                            valueFormatter: { L10n.tr("unit.px", Int($0)) }
-                        )
-                        Divider().padding(.leading, 40)
-                        settingsNumericSliderRow(
-                            L10n.tr("settings.minShakeSpeed"),
-                            icon: "speedometer",
-                            iconColor: .mint,
-                            value: $mouseCompanionShakeMinimumSpeed,
-                            in: 600...3000,
-                            step: 50,
-                            valueFormatter: { L10n.tr("unit.pxPerSecond", Int($0)) }
-                        )
                     }
                 }
 
@@ -270,31 +245,6 @@ struct SettingsWindowView: View {
             Spacer()
             Slider(value: value, in: 0...1)
                 .frame(width: 120)
-        }
-        .frame(height: 32)
-    }
-
-    private func settingsNumericSliderRow(
-        _ label: String,
-        icon: String,
-        iconColor: Color,
-        value: Binding<Double>,
-        in range: ClosedRange<Double>,
-        step: Double,
-        valueFormatter: @escaping (Double) -> String
-    ) -> some View {
-        HStack(spacing: 10) {
-            iconBadge(icon, color: iconColor)
-            Text(label)
-                .font(.system(size: 13))
-                .foregroundColor(.primary)
-            Spacer()
-            Slider(value: value, in: range, step: step)
-                .frame(width: 120)
-            Text(valueFormatter(value.wrappedValue))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.secondary)
-                .frame(width: 64, alignment: .trailing)
         }
         .frame(height: 32)
     }
