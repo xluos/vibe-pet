@@ -1,0 +1,15 @@
+{
+  "originHash" : "df9c62af2740116749b2d78e3dd3dcf68ca00059a02a2fc8dd6c9d6a79450fc1",
+  "pins" : [
+    {
+      "identity" : "tomlkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/LebJe/TOMLKit.git",
+      "state" : {
+        "revision" : "ec6198d37d495efc6acd4dffbd262cdca7ff9b3f",
+        "version" : "0.6.0"
+      }
+    }
+  ],
+  "version" : 3
+}

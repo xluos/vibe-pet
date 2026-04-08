@@ -31,17 +31,34 @@ final class SoundManager {
         outputFormat = format
         engine.connect(playerNode, to: engine.mainMixerNode, format: format)
 
+        startEngine()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleEngineConfigChange),
+            name: .AVAudioEngineConfigurationChange,
+            object: engine
+        )
+    }
+
+    private func startEngine() {
         do {
             try engine.start()
             isReady = true
         } catch {
+            isReady = false
             print("[VibePet] Audio engine failed to start: \(error)")
         }
     }
 
+    @objc private func handleEngineConfigChange(_ notification: Notification) {
+        isReady = false
+        startEngine()
+    }
+
     func play(_ event: SoundEvent) {
-        // Always dispatch to main thread for safety
         DispatchQueue.main.async { [self] in
+            if !engine.isRunning { startEngine() }
             guard isReady, let buffer = buffers[event] else { return }
             playerNode.stop()
             playerNode.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)

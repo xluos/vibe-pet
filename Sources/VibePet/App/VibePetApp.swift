@@ -23,6 +23,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         installLauncher()
         HookInstaller().installIfNeeded()
 
+        // Check Codex hooks status on first launch
+        checkCodexHooksOnFirstLaunch()
+
         // Start IPC socket server
         socketServer = SocketServer { [weak self] message in
             DispatchQueue.main.async {
@@ -43,6 +46,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let hookEvent = notification.userInfo?["hookEvent"] as? String else { return }
             switch hookEvent {
             case "SessionStart":
+                SoundManager.shared.play(.sessionStart)
+            case "UserPromptSubmit":
                 SoundManager.shared.play(.sessionStart)
             case "Stop":
                 SoundManager.shared.play(.taskComplete)
@@ -141,5 +146,81 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         try? script.write(to: launcherPath, atomically: true, encoding: .utf8)
         chmod(launcherPath.path, 0o755)
         print("[VibePet] Launcher installed at \(launcherPath.path)")
+    }
+
+    private func checkCodexHooksOnFirstLaunch() {
+        // Only check once per installation
+        let checkedKey = "vibepet.codexHooksChecked"
+        guard UserDefaults.standard.object(forKey: checkedKey) == nil else {
+            return
+        }
+
+        // Mark as checked
+        UserDefaults.standard.set(true, forKey: checkedKey)
+
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let codexDir = home.appendingPathComponent(".codex")
+
+        // Check if ~/.codex exists
+        guard FileManager.default.fileExists(atPath: codexDir.path) else {
+            print("[VibePet] ~/.codex not found, skipping Codex hooks check")
+            return
+        }
+
+        let configPath = codexDir.appendingPathComponent("config.toml")
+        guard FileManager.default.fileExists(atPath: configPath.path) else {
+            print("[VibePet] ~/.codex/config.toml not found, skipping Codex hooks check")
+            return
+        }
+
+        // Check if hooks are explicitly disabled
+        let installer = HookInstaller()
+        let hooksEnabled = installer.isCodexHooksEnabled(at: configPath)
+
+        if !hooksEnabled {
+            // Only show dialog if hooks are explicitly disabled (codex_hooks = false)
+            DispatchQueue.main.async {
+                self.showCodexHooksEnableDialog()
+            }
+        }
+    }
+
+    private func showCodexHooksEnableDialog() {
+        let alert = NSAlert()
+        alert.messageText = "启用 Codex Hooks？"
+        alert.informativeText = "VibePet 检测到 Codex CLI 已安装，但 config.toml 中的 hooks 未启用。是否启用 hooks 以追踪您的 Codex 会话？"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "启用 Hooks")
+        alert.addButton(withTitle: "暂不启用")
+
+        let response = alert.runModal()
+
+        if response == .alertFirstButtonReturn {
+            // User chose to enable hooks
+            do {
+                try HookInstaller().enableCodexHooks()
+                print("[VibePet] Codex hooks enabled by user")
+
+                // Show success message
+                let successAlert = NSAlert()
+                successAlert.messageText = "Codex Hooks 已启用"
+                successAlert.informativeText = "Codex hooks 已成功启用。VibePet 现在将追踪您的 Codex 会话。"
+                successAlert.alertStyle = .informational
+                successAlert.addButton(withTitle: "好的")
+                successAlert.runModal()
+            } catch {
+                print("[VibePet] Failed to enable Codex hooks: \(error)")
+
+                // Show error message
+                let errorAlert = NSAlert()
+                errorAlert.messageText = "启用 Hooks 失败"
+                errorAlert.informativeText = "无法启用 Codex hooks：\(error.localizedDescription)\n\n您可以稍后在设置中重试。"
+                errorAlert.alertStyle = .warning
+                errorAlert.addButton(withTitle: "好的")
+                errorAlert.runModal()
+            }
+        } else {
+            print("[VibePet] User declined to enable Codex hooks")
+        }
     }
 }

@@ -17,7 +17,7 @@ class SettingsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "VibePet Settings"
+        window.title = "VibePet 设置"
         window.center()
         window.isReleasedWhenClosed = false
 
@@ -56,17 +56,17 @@ struct SettingsWindowView: View {
                 .padding(.bottom, 4)
 
                 // Sound
-                settingsSection("Sound") {
-                    settingsToggleRow("Notification sounds", icon: "speaker.wave.2", iconColor: .blue, isOn: $soundEnabled)
+                settingsSection("声音") {
+                    settingsToggleRow("通知声音", icon: "speaker.wave.2", iconColor: .blue, isOn: $soundEnabled)
                     if soundEnabled {
                         Divider().padding(.leading, 40)
-                        settingsSliderRow("Volume", icon: "speaker", iconColor: .blue, value: $soundVolume)
+                        settingsSliderRow("音量", icon: "speaker", iconColor: .blue, value: $soundVolume)
                     }
                 }
 
                 // General
-                settingsSection("General") {
-                    settingsToggleRow("Launch at login", icon: "power", iconColor: .green, isOn: $launchAtLogin)
+                settingsSection("通用") {
+                    settingsToggleRow("开机启动", icon: "power", iconColor: .green, isOn: $launchAtLogin)
                 }
 
                 // Hooks
@@ -79,14 +79,14 @@ struct SettingsWindowView: View {
                 }
 
                 // Data
-                settingsSection("Data") {
-                    settingsInfoRow("Sessions file", icon: "doc", iconColor: .gray, value: "~/.vibe-pet/sessions.json")
+                settingsSection("数据") {
+                    settingsInfoRow("会话文件", icon: "doc", iconColor: .gray, value: "~/.vibe-pet/sessions.json")
                     Divider().padding(.leading, 40)
-                    settingsButtonRow("Reinstall hooks", icon: "arrow.triangle.2.circlepath", iconColor: .blue) {
-                        HookInstaller().installAll()
+                    settingsButtonRow("重新安装 hooks", icon: "arrow.triangle.2.circlepath", iconColor: .blue) {
+                        reinstallHooks()
                     }
                     Divider().padding(.leading, 40)
-                    settingsButtonRow("Uninstall hooks", icon: "xmark.circle", iconColor: .red) {
+                    settingsButtonRow("卸载 hooks", icon: "xmark.circle", iconColor: .red) {
                         HookInstaller().uninstallAll()
                     }
                     Divider().padding(.leading, 40)
@@ -100,7 +100,7 @@ struct SettingsWindowView: View {
                 Button(action: { NSApplication.shared.terminate(nil) }) {
                     HStack {
                         Image(systemName: "power")
-                        Text("Quit VibePet")
+                        Text("退出 VibePet")
                     }
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.red)
@@ -202,18 +202,73 @@ struct SettingsWindowView: View {
 
     private func hookStatus(for source: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let path: String
+
         switch source {
-        case "claude": path = "\(home)/.claude/settings.json"
-        case "codex": path = "\(home)/.codex/hooks.json"
-        case "coco": path = "\(home)/.trae/traecli.yaml"
-        default: return "Unknown"
+        case "claude":
+            let path = "\(home)/.claude/settings.json"
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                  let str = String(data: data, encoding: .utf8) else {
+                return "未配置"
+            }
+            return str.contains("vibe-pet-bridge") ? "已激活" : "未配置"
+
+        case "codex":
+            let configPath = "\(home)/.codex/config.toml"
+            let installer = HookInstaller()
+            return installer.isCodexHooksEnabled(at: URL(fileURLWithPath: configPath)) ? "已激活" : "未激活"
+
+        case "coco":
+            let path = "\(home)/.trae/traecli.yaml"
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                  let str = String(data: data, encoding: .utf8) else {
+                return "未配置"
+            }
+            return str.contains("vibe-pet-bridge") ? "已激活" : "未配置"
+
+        default:
+            return "未知"
         }
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-              let str = String(data: data, encoding: .utf8) else {
-            return "Not configured"
+    }
+
+    private func reinstallHooks() {
+        let installer = HookInstaller()
+
+        // Check if Codex needs confirmation
+        if installer.needsCodexHooksConfirmation() {
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "启用 Codex Hooks？"
+                alert.informativeText = "检测到 Codex CLI 已安装，但 config.toml 中的 hooks 未启用。是否启用 hooks？"
+                alert.alertStyle = .informational
+                alert.addButton(withTitle: "启用 Hooks")
+                alert.addButton(withTitle: "跳过")
+
+                let response = alert.runModal()
+
+                if response == .alertFirstButtonReturn {
+                    // User chose to enable hooks
+                    do {
+                        try installer.enableCodexHooks()
+                        print("[VibePet] Codex hooks enabled during reinstall")
+                    } catch {
+                        print("[VibePet] Failed to enable Codex hooks: \(error)")
+                        let errorAlert = NSAlert()
+                        errorAlert.messageText = "启用 Codex Hooks 失败"
+                        errorAlert.informativeText = error.localizedDescription
+                        errorAlert.alertStyle = .warning
+                        errorAlert.addButton(withTitle: "好的")
+                        errorAlert.runModal()
+                        return
+                    }
+                }
+
+                // Install all hooks
+                installer.installAll()
+            }
+        } else {
+            // Install all hooks directly
+            installer.installAll()
         }
-        return str.contains("vibe-pet-bridge") ? "Active" : "Not configured"
     }
 }
 
