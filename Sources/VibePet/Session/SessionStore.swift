@@ -14,6 +14,7 @@ final class SessionStore {
     init() {
         load()
         purgeExpiredEndedSessions()
+        refreshMissingTitles()
     }
 
     // MARK: - Computed
@@ -92,6 +93,7 @@ final class SessionStore {
         }
 
         sessions[message.sessionId] = session
+        refreshTitleIfNeeded(for: session)
         save()
 
         if session.status != previousStatus {
@@ -136,6 +138,24 @@ final class SessionStore {
         guard let list = try? decoder.decode([Session].self, from: data) else { return }
         for session in list {
             sessions[session.id] = session
+        }
+    }
+
+    private func refreshMissingTitles() {
+        for session in sessions.values where session.title == nil || session.title?.isEmpty == true {
+            refreshTitleIfNeeded(for: session)
+        }
+    }
+
+    private func refreshTitleIfNeeded(for session: Session) {
+        guard session.title == nil || session.title?.isEmpty == true else { return }
+        guard session.source == .codex || session.source == .claude else { return }
+
+        SessionTitleResolver.shared.resolveTitle(for: session) { [weak self, weak session] title in
+            guard let self, let session, let title, !title.isEmpty else { return }
+            guard session.title != title else { return }
+            session.title = title
+            self.save()
         }
     }
 

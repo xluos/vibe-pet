@@ -2,6 +2,10 @@ import SwiftUI
 
 // MARK: - Notch extension shape
 
+private enum AttentionPulseStyle {
+    static let animation = Animation.easeOut(duration: 1.28).repeatForever(autoreverses: false)
+}
+
 struct NotchExtensionShape: Shape {
     let bottomRadius: CGFloat
 
@@ -44,6 +48,8 @@ struct NotchContentView: View {
     private var isExpanded: Bool { viewModel.isExpanded }
 
     var body: some View {
+        let shape = NotchExtensionShape(bottomRadius: isExpanded ? 18 : 10)
+
         VStack(spacing: 0) {
             capsuleBar
 
@@ -54,7 +60,15 @@ struct NotchContentView: View {
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(.black)
-        .clipShape(NotchExtensionShape(bottomRadius: isExpanded ? 18 : 10))
+        .clipShape(shape)
+        .overlay {
+            if !isExpanded && sessionStore.hasSessionNeedingAttention {
+                AttentionBodyBorderView(
+                    shape: shape,
+                    color: attentionAccentColor
+                )
+            }
+        }
     }
 
     // MARK: - Collapsed bar
@@ -175,6 +189,13 @@ struct NotchContentView: View {
         }
     }
 
+    private var attentionAccentColor: Color {
+        if sessionStore.sessions.values.contains(where: { $0.status == .needsApproval }) {
+            return Color(red: 1.0, green: 0.22, blue: 0.18)
+        }
+        return Color(red: 1.0, green: 0.74, blue: 0.08)
+    }
+
     private func derivePetState() -> PetState {
         if sessionStore.sessions.values.contains(where: { $0.status == .needsApproval }) {
             return .needsAttention
@@ -184,6 +205,108 @@ struct NotchContentView: View {
             return .sleeping
         } else {
             return .idle
+        }
+    }
+}
+
+struct AttentionHaloRootView: View {
+    let notchWidth: CGFloat
+    let notchHeight: CGFloat
+    let sideInset: CGFloat
+    let topInset: CGFloat
+    let bottomInset: CGFloat
+    let color: Color
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            AttentionHaloView(
+                shape: NotchExtensionShape(bottomRadius: 10),
+                color: color
+            )
+            .frame(width: notchWidth, height: notchHeight)
+            .padding(.top, topInset)
+        }
+        .frame(
+            width: notchWidth + sideInset * 2,
+            height: notchHeight + topInset + bottomInset,
+            alignment: .top
+        )
+        .background(Color.clear)
+        .allowsHitTesting(false)
+    }
+}
+
+private struct AttentionBodyBorderView<S: Shape>: View {
+    let shape: S
+    let color: Color
+
+    @State private var isAnimating = false
+
+    private let topMaskInset: CGFloat = 9
+    private let baseOutset: CGFloat = 3
+
+    var body: some View {
+        ZStack {
+            shape
+                .stroke(
+                    color.opacity(isAnimating ? 0.22 : 0.88),
+                    style: StrokeStyle(
+                        lineWidth: isAnimating ? 1.0 : 1.7,
+                        lineCap: .round,
+                        lineJoin: .round
+                    )
+                )
+                .shadow(color: color.opacity(isAnimating ? 0.1 : 0.34), radius: isAnimating ? 4 : 7)
+                .scaleEffect(isAnimating ? 1.04 : 1.02)
+                .padding(-baseOutset)
+
+            shape
+                .stroke(color.opacity(isAnimating ? 0.0 : 0.26), lineWidth: 5.5)
+                .blur(radius: isAnimating ? 10 : 4)
+                .scaleEffect(isAnimating ? 1.08 : 1.04)
+                .padding(-(baseOutset + 1))
+        }
+        .mask(alignment: .bottom) {
+            Rectangle()
+                .padding(.top, topMaskInset)
+        }
+        .allowsHitTesting(false)
+        .onAppear {
+            withAnimation(AttentionPulseStyle.animation) {
+                isAnimating = true
+            }
+        }
+    }
+}
+
+private struct AttentionHaloView<S: Shape>: View {
+    let shape: S
+    let color: Color
+
+    @State private var isAnimating = false
+
+    var body: some View {
+        ZStack {
+            shape
+                .stroke(color.opacity(isAnimating ? 0.0 : 1), lineWidth: 2.6)
+                .scaleEffect(isAnimating ? 1.34 : 1.03)
+                .blur(radius: isAnimating ? 14 : 4)
+
+            shape
+                .stroke(color.opacity(isAnimating ? 0.0 : 0.7), lineWidth: 4.5)
+                .scaleEffect(isAnimating ? 1.62 : 1.1)
+                .blur(radius: isAnimating ? 26 : 7)
+
+            shape
+                .stroke(color.opacity(isAnimating ? 0.0 : 0.4), lineWidth: 8)
+                .scaleEffect(isAnimating ? 1.84 : 1.16)
+                .blur(radius: isAnimating ? 40 : 10)
+        }
+        .allowsHitTesting(false)
+        .onAppear {
+            withAnimation(AttentionPulseStyle.animation) {
+                isAnimating = true
+            }
         }
     }
 }

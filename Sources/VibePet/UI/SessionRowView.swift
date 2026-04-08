@@ -8,7 +8,7 @@ struct SessionRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Top row: source badge, status, cwd, time, archive
+            // Top row: source badge, status, cwd, title, time, archive
             HStack(spacing: 6) {
                 Text(sourceBadge)
                     .font(.system(size: 7, weight: .bold, design: .monospaced))
@@ -21,10 +21,23 @@ struct SessionRowView: View {
                     .fill(statusColor)
                     .frame(width: 6, height: 6)
 
-                Text(cwdLabel)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(cwdLabel)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+
+                    if let title = sessionTitle {
+                        Text("·")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.gray)
+
+                        Text(title)
+                            .font(.system(size: 10))
+                            .foregroundColor(.gray)
+                            .lineLimit(1)
+                    }
+                }
 
                 Spacer()
 
@@ -118,6 +131,17 @@ struct SessionRowView: View {
             return URL(fileURLWithPath: cwd).lastPathComponent
         }
         return session.id.prefix(8).description
+    }
+
+    private var sessionTitle: String? {
+        guard let title = session.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else {
+            return nil
+        }
+        if title == cwdLabel {
+            return nil
+        }
+        return title
     }
 
     private var statusLabel: String {

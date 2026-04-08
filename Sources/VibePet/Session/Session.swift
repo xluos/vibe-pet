@@ -24,6 +24,7 @@ final class Session: Identifiable, Codable {
     var cwd: String?
     var tty: String?
     var terminalBundleId: String?
+    var title: String?
     var lastToolName: String?
     var lastPrompt: String?
     var lastAssistantMessage: String?
@@ -43,7 +44,7 @@ final class Session: Identifiable, Codable {
 
     // Codable
     enum CodingKeys: String, CodingKey {
-        case id, source, status, cwd, tty, terminalBundleId, lastToolName, lastPrompt, lastAssistantMessage, startedAt, lastEventAt
+        case id, source, status, cwd, tty, terminalBundleId, title, lastToolName, lastPrompt, lastAssistantMessage, startedAt, lastEventAt
     }
 
     required init(from decoder: Decoder) throws {
@@ -54,6 +55,7 @@ final class Session: Identifiable, Codable {
         cwd = try c.decodeIfPresent(String.self, forKey: .cwd)
         tty = try c.decodeIfPresent(String.self, forKey: .tty)
         terminalBundleId = try c.decodeIfPresent(String.self, forKey: .terminalBundleId)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
         lastToolName = try c.decodeIfPresent(String.self, forKey: .lastToolName)
         lastPrompt = try c.decodeIfPresent(String.self, forKey: .lastPrompt)
         lastAssistantMessage = try c.decodeIfPresent(String.self, forKey: .lastAssistantMessage)
@@ -69,6 +71,7 @@ final class Session: Identifiable, Codable {
         try c.encodeIfPresent(cwd, forKey: .cwd)
         try c.encodeIfPresent(tty, forKey: .tty)
         try c.encodeIfPresent(terminalBundleId, forKey: .terminalBundleId)
+        try c.encodeIfPresent(title, forKey: .title)
         try c.encodeIfPresent(lastToolName, forKey: .lastToolName)
         try c.encodeIfPresent(lastPrompt, forKey: .lastPrompt)
         try c.encodeIfPresent(lastAssistantMessage, forKey: .lastAssistantMessage)
