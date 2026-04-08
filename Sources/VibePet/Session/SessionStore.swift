@@ -4,6 +4,11 @@ import Foundation
 final class SessionStore {
     var sessions: [String: Session] = [:]
     private let endedSessionRetentionDays = 7
+    private let codexTitlePromptMarkers = [
+        "you are a helpful assistant. you will be presented with a user prompt",
+        "provide a short title for a task",
+        "the tasks typically have to do with coding",
+    ]
 
     private static var storePath: URL {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".vibe-pet")
@@ -13,7 +18,12 @@ final class SessionStore {
 
     init() {
         load()
+        let beforePurgeCount = sessions.count
+        purgeInternalCodexTitleSessions()
         purgeExpiredEndedSessions()
+        if sessions.count != beforePurgeCount {
+            save()
+        }
         refreshMissingTitles()
     }
 
@@ -21,28 +31,34 @@ final class SessionStore {
 
     var activeSessions: [Session] {
         sessions.values
+            .filter { !isInternalCodexTitleSession($0) }
             .filter { $0.status != .ended && $0.status != .archived }
             .sorted { $0.lastEventAt > $1.lastEventAt }
     }
 
     var allSessions: [Session] {
         sessions.values
+            .filter { !isInternalCodexTitleSession($0) }
             .filter { $0.status != .archived }
             .sorted { $0.lastEventAt > $1.lastEventAt }
     }
 
     var archivedSessions: [Session] {
         sessions.values
+            .filter { !isInternalCodexTitleSession($0) }
             .filter { $0.status == .archived }
             .sorted { $0.lastEventAt > $1.lastEventAt }
     }
 
     var hasSessionNeedingAttention: Bool {
-        sessions.values.contains { $0.status == .needsApproval || $0.status == .waitingForInput }
+        sessions.values.contains {
+            !isInternalCodexTitleSession($0) && ($0.status == .needsApproval || $0.status == .waitingForInput)
+        }
     }
 
     var primaryAttentionSession: Session? {
         sessions.values
+            .filter { !isInternalCodexTitleSession($0) }
             .filter { $0.status == .needsApproval || $0.status == .waitingForInput }
             .sorted {
                 let lhsPriority = attentionPriority(for: $0.status)
@@ -56,7 +72,9 @@ final class SessionStore {
     }
 
     var hasActiveSession: Bool {
-        sessions.values.contains { $0.status == .active || $0.status == .starting }
+        sessions.values.contains {
+            !isInternalCodexTitleSession($0) && ($0.status == .active || $0.status == .starting)
+        }
     }
 
     // MARK: - Events
@@ -85,6 +103,14 @@ final class SessionStore {
         if let prompt = message.prompt { session.lastPrompt = prompt }
         if let assistMsg = message.lastAssistantMessage { session.lastAssistantMessage = assistMsg }
         session.lastEventAt = message.date
+
+        // Codex creates an internal "title generation" task before the real task starts.
+        // It has its own session id and should not be rendered as a user-facing session.
+        if isInternalCodexTitleSession(session) {
+            sessions.removeValue(forKey: message.sessionId)
+            save()
+            return
+        }
 
         let previousStatus = session.status
         switch message.hookEvent {
@@ -181,6 +207,30 @@ final class SessionStore {
         sessions = sessions.filter { _, session in
             session.status != .ended || session.lastEventAt >= cutoff
         }
+    }
+
+    private func purgeInternalCodexTitleSessions() {
+        sessions = sessions.filter { _, session in
+            !isInternalCodexTitleSession(session)
+        }
+    }
+
+    private func isInternalCodexTitleSession(_ session: Session) -> Bool {
+        guard session.source == .codex else { return false }
+        let prompt = session.lastPrompt?.lowercased() ?? ""
+        let assistantMessage = session.lastAssistantMessage?.lowercased() ?? ""
+        let fromCodexApp = session.terminalBundleId == "com.openai.codex"
+
+        let promptLooksLikeTitleGeneration = codexTitlePromptMarkers.filter { prompt.contains($0) }.count >= 2
+        let assistantLooksLikeTitleJSON = assistantMessage.contains("\"title\"")
+            && assistantMessage.contains("{")
+            && assistantMessage.contains("}")
+
+        // Title-generation sessions are usually emitted by Codex app and contain either:
+        // 1) the known title-generation system prompt template, or
+        // 2) a compact JSON-style title response like {"title":"..."}.
+        return (fromCodexApp && (promptLooksLikeTitleGeneration || assistantLooksLikeTitleJSON))
+            || (promptLooksLikeTitleGeneration && assistantLooksLikeTitleJSON)
     }
 
     private func attentionPriority(for status: SessionStatus) -> Int {

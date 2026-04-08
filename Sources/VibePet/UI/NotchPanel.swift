@@ -100,6 +100,12 @@ class NotchWindowController: NSWindowController {
             name: .sessionStatusChanged,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleLanguageChanged),
+            name: L10n.languageDidChangeNotification,
+            object: nil
+        )
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -212,6 +218,11 @@ class NotchWindowController: NSWindowController {
         guard let panel = window as? NSPanel else { return }
         updateAttentionHalo(relativeTo: panel)
         updateMouseCompanion()
+    }
+
+    @objc
+    private func handleLanguageChanged() {
+        refreshAttentionUI()
     }
 
     private func repositionPanel(_ panel: NSPanel, width: CGFloat, height: CGFloat) {

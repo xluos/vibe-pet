@@ -33,6 +33,8 @@ class SettingsWindowController: NSWindowController {
 }
 
 struct SettingsWindowView: View {
+    @AppStorage(L10n.languageKey) private var appLanguage = ""
+    @State private var languageRefreshID = UUID()
     @AppStorage("vibepet.soundEnabled") private var soundEnabled = true
     @AppStorage("vibepet.launchAtLogin") private var launchAtLogin = false
     @AppStorage("vibepet.soundVolume") private var soundVolume = 0.5
@@ -78,6 +80,8 @@ struct SettingsWindowView: View {
                 // General
                 settingsSection(L10n.tr("settings.section.general")) {
                     settingsToggleRow(L10n.tr("settings.launchAtLogin"), icon: "power", iconColor: .green, isOn: $launchAtLogin)
+                    Divider().padding(.leading, 40)
+                    settingsLanguagePickerRow(L10n.tr("settings.language"), icon: "globe", iconColor: .teal)
                 }
 
                 settingsSection(L10n.tr("settings.section.display")) {
@@ -183,9 +187,14 @@ struct SettingsWindowView: View {
             .padding(.bottom, 20)
         }
         .frame(width: 420, height: 660)
+        .id(languageRefreshID)
         .onAppear(perform: reloadDisplays)
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
             reloadDisplays()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: L10n.languageDidChangeNotification)) { _ in
+            languageRefreshID = UUID()
+            SettingsWindowController.shared?.window?.title = L10n.tr("settings.windowTitle")
         }
     }
 
@@ -330,6 +339,24 @@ struct SettingsWindowView: View {
         .frame(height: 32)
     }
 
+    private func settingsLanguagePickerRow(_ label: String, icon: String, iconColor: Color) -> some View {
+        HStack(spacing: 10) {
+            iconBadge(icon, color: iconColor)
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundColor(.primary)
+            Spacer()
+            Picker("", selection: languageSelectionBinding) {
+                Text(L10n.tr("settings.language.system")).tag("")
+                Text(L10n.tr("settings.language.zhHans")).tag("zh-Hans")
+                Text(L10n.tr("settings.language.en")).tag("en")
+            }
+            .labelsHidden()
+            .frame(width: 190)
+        }
+        .frame(height: 32)
+    }
+
     private func settingsAttentionPickerRow(_ label: String, icon: String, iconColor: Color) -> some View {
         HStack(spacing: 10) {
             iconBadge(icon, color: iconColor)
@@ -433,6 +460,13 @@ struct SettingsWindowView: View {
 
     private var selectedStrongAttentionSoundCadence: AttentionReminderSoundCadence {
         AttentionReminderSoundCadence(rawValue: strongAttentionAnimationSoundCadenceRawValue) ?? AttentionAnimationPreferences.defaultSoundCadence
+    }
+
+    private var languageSelectionBinding: Binding<String> {
+        Binding(
+            get: { appLanguage },
+            set: { L10n.setLanguage($0) }
+        )
     }
 }
 

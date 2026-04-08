@@ -3,6 +3,8 @@ import SwiftUI
 struct SessionRowView: View {
     let session: Session
     var onArchive: (() -> Void)?
+    @AppStorage(L10n.languageKey) private var appLanguage = ""
+    @State private var languageRefreshID = UUID()
     @State private var now = Date()
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -93,8 +95,12 @@ struct SessionRowView: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(Color.white.opacity(0.05))
         )
+        .id(languageRefreshID)
         .contentShape(Rectangle())
         .onReceive(timer) { now = $0 }
+        .onReceive(NotificationCenter.default.publisher(for: L10n.languageDidChangeNotification)) { _ in
+            languageRefreshID = UUID()
+        }
     }
 
     private var sourceBadge: String {

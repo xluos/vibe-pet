@@ -198,6 +198,8 @@ struct NotchRootView: View {
 struct NotchContentView: View {
     let viewModel: NotchViewModel
 
+    @AppStorage(L10n.languageKey) private var appLanguage = ""
+    @State private var languageRefreshID = UUID()
     @AppStorage(AttentionAnimationPreferences.strongEnabledKey) private var strongAttentionAnimationEnabled = false
     @AppStorage(AttentionAnimationPreferences.styleKey) private var strongAttentionAnimationStyleRawValue = AttentionAnimationPreferences.defaultStrongStyle.rawValue
 
@@ -218,6 +220,10 @@ struct NotchContentView: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .background(.black)
         .clipShape(shape)
+        .id(languageRefreshID)
+        .onReceive(NotificationCenter.default.publisher(for: L10n.languageDidChangeNotification)) { _ in
+            languageRefreshID = UUID()
+        }
         .overlay {
             if !isExpanded && sessionStore.hasSessionNeedingAttention {
                 AttentionBodyBorderView(

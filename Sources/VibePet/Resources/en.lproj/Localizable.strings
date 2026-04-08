@@ -9,6 +9,10 @@
 "settings.notificationSounds" = "Notification sounds";
 "settings.volume" = "Volume";
 "settings.launchAtLogin" = "Launch at login";
+"settings.language" = "Language";
+"settings.language.system" = "Follow System";
+"settings.language.zhHans" = "Chinese (Simplified)";
+"settings.language.en" = "English";
 "settings.pinnedDisplay" = "Pinned display";
 "settings.strongAttentionAnimation" = "Strong attention animation";
 "settings.animationStyle" = "Animation style";
