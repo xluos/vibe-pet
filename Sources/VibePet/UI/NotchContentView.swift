@@ -80,7 +80,7 @@ struct NotchContentView: View {
             }
         }
         .padding(.horizontal, 10)
-        .frame(height: 33)
+        .frame(height: viewModel.notchHeight)
     }
 
     // MARK: - Expanded content

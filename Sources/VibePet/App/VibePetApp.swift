@@ -16,6 +16,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var sessionStore = SessionStore()
     private var notchPanel: NotchWindowController?
     private var soundObserver: Any?
+    private var screenObserver: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Install launcher script and hooks
@@ -57,11 +58,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Create notch panel UI
         notchPanel = NotchWindowController(sessionStore: sessionStore)
         notchPanel?.showWindow(nil)
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.notchPanel?.refreshScreenConfiguration()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         socketServer?.stop()
         if let observer = soundObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = screenObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
