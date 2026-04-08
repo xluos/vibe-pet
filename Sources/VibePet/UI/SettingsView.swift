@@ -44,6 +44,8 @@ struct SettingsWindowView: View {
     @AppStorage(AttentionAnimationPreferences.mouseCompanionCatEnabledKey) private var mouseCompanionCatEnabled = true
     @AppStorage(AttentionAnimationPreferences.mouseCompanionBubbleEnabledKey) private var mouseCompanionBubbleEnabled = true
     @AppStorage(AttentionAnimationPreferences.mouseCompanionShakeDismissEnabledKey) private var mouseCompanionShakeDismissEnabled = true
+    @AppStorage(AttentionAnimationPreferences.mouseCompanionShakeMinimumDistanceKey) private var mouseCompanionShakeMinimumDistance = AttentionAnimationPreferences.defaultMouseCompanionShakeMinimumDistance
+    @AppStorage(AttentionAnimationPreferences.mouseCompanionShakeMinimumSpeedKey) private var mouseCompanionShakeMinimumSpeed = AttentionAnimationPreferences.defaultMouseCompanionShakeMinimumSpeed
     @State private var displayOptions = DisplayPreferences.availableDisplays()
 
     var body: some View {
@@ -107,6 +109,30 @@ struct SettingsWindowView: View {
                     settingsToggleRow("Speech bubble", icon: "text.bubble", iconColor: .mint, isOn: $mouseCompanionBubbleEnabled)
                     Divider().padding(.leading, 40)
                     settingsToggleRow("Shake to dismiss", icon: "hand.draw", iconColor: .mint, isOn: $mouseCompanionShakeDismissEnabled)
+                    if mouseCompanionShakeDismissEnabled {
+                        Divider().padding(.leading, 40)
+                        settingsShakePresetRow("Shake sensitivity", icon: "dial.medium", iconColor: .mint)
+                        Divider().padding(.leading, 40)
+                        settingsNumericSliderRow(
+                            "Min shake distance",
+                            icon: "arrow.left.and.right",
+                            iconColor: .mint,
+                            value: $mouseCompanionShakeMinimumDistance,
+                            in: 8...60,
+                            step: 1,
+                            valueFormatter: { "\(Int($0)) px" }
+                        )
+                        Divider().padding(.leading, 40)
+                        settingsNumericSliderRow(
+                            "Min shake speed",
+                            icon: "speedometer",
+                            iconColor: .mint,
+                            value: $mouseCompanionShakeMinimumSpeed,
+                            in: 600...3000,
+                            step: 50,
+                            valueFormatter: { "\(Int($0)) px/s" }
+                        )
+                    }
                 }
 
                 // Hooks
@@ -201,6 +227,31 @@ struct SettingsWindowView: View {
         .frame(height: 32)
     }
 
+    private func settingsShakePresetRow(_ label: String, icon: String, iconColor: Color) -> some View {
+        HStack(spacing: 10) {
+            iconBadge(icon, color: iconColor)
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundColor(.primary)
+            Spacer()
+            HStack(spacing: 6) {
+                shakePresetButton("低", distance: 18, speed: 1300)
+                shakePresetButton("中", distance: 22, speed: 1650)
+                shakePresetButton("高", distance: 30, speed: 2200)
+            }
+        }
+        .frame(height: 32)
+    }
+
+    private func shakePresetButton(_ title: String, distance: Double, speed: Double) -> some View {
+        Button(title) {
+            mouseCompanionShakeMinimumDistance = distance
+            mouseCompanionShakeMinimumSpeed = speed
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
+    }
+
     private func settingsSliderRow(_ label: String, icon: String, iconColor: Color, value: Binding<Double>) -> some View {
         HStack(spacing: 10) {
             iconBadge(icon, color: iconColor)
@@ -210,6 +261,31 @@ struct SettingsWindowView: View {
             Spacer()
             Slider(value: value, in: 0...1)
                 .frame(width: 120)
+        }
+        .frame(height: 32)
+    }
+
+    private func settingsNumericSliderRow(
+        _ label: String,
+        icon: String,
+        iconColor: Color,
+        value: Binding<Double>,
+        in range: ClosedRange<Double>,
+        step: Double,
+        valueFormatter: @escaping (Double) -> String
+    ) -> some View {
+        HStack(spacing: 10) {
+            iconBadge(icon, color: iconColor)
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundColor(.primary)
+            Spacer()
+            Slider(value: value, in: range, step: step)
+                .frame(width: 120)
+            Text(valueFormatter(value.wrappedValue))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.secondary)
+                .frame(width: 64, alignment: .trailing)
         }
         .frame(height: 32)
     }

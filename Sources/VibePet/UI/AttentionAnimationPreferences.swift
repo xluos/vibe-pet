@@ -98,9 +98,13 @@ enum AttentionAnimationPreferences {
     static let mouseCompanionCatEnabledKey = "vibepet.mouseCompanionCatEnabled"
     static let mouseCompanionBubbleEnabledKey = "vibepet.mouseCompanionBubbleEnabled"
     static let mouseCompanionShakeDismissEnabledKey = "vibepet.mouseCompanionShakeDismissEnabled"
+    static let mouseCompanionShakeMinimumDistanceKey = "vibepet.mouseCompanionShakeMinimumDistance"
+    static let mouseCompanionShakeMinimumSpeedKey = "vibepet.mouseCompanionShakeMinimumSpeed"
     static let defaultStrongStyle: AttentionAnimationVariant = .urgentPulse
     static let defaultSoundCadence: AttentionReminderSoundCadence = .everyCycle
     static let cycleDuration: TimeInterval = 1.5
+    static let defaultMouseCompanionShakeMinimumDistance: Double = 22
+    static let defaultMouseCompanionShakeMinimumSpeed: Double = 1650
 
     static func resolvedVariant(defaults: UserDefaults = .standard) -> AttentionAnimationVariant {
         resolvedVariant(
@@ -147,5 +151,19 @@ enum AttentionAnimationPreferences {
             return defaults.bool(forKey: mouseCompanionShakeDismissEnabledKey)
         }
         return true
+    }
+
+    static func resolvedMouseCompanionShakeMinimumDistance(defaults: UserDefaults = .standard) -> CGFloat {
+        if defaults.object(forKey: mouseCompanionShakeMinimumDistanceKey) != nil {
+            return CGFloat(defaults.double(forKey: mouseCompanionShakeMinimumDistanceKey))
+        }
+        return CGFloat(defaultMouseCompanionShakeMinimumDistance)
+    }
+
+    static func resolvedMouseCompanionShakeMinimumSpeed(defaults: UserDefaults = .standard) -> CGFloat {
+        if defaults.object(forKey: mouseCompanionShakeMinimumSpeedKey) != nil {
+            return CGFloat(defaults.double(forKey: mouseCompanionShakeMinimumSpeedKey))
+        }
+        return CGFloat(defaultMouseCompanionShakeMinimumSpeed)
     }
 }

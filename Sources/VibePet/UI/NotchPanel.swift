@@ -452,22 +452,18 @@ class NotchWindowController: NSWindowController {
 
         let axis: ShakeAxis
         let delta: CGFloat
-        let crossDelta: CGFloat
         if absDx >= absDy {
             axis = .horizontal
             delta = dx
-            crossDelta = absDy
         } else {
             axis = .vertical
             delta = dy
-            crossDelta = absDx
         }
 
         let magnitude = abs(delta)
         let speed = magnitude / CGFloat(dt)
-        guard magnitude >= 22 else { return }
-        guard speed >= 1650 else { return }
-        guard magnitude >= crossDelta * 1.5 else { return }
+        guard magnitude >= mouseCompanionShakeMinimumDistance else { return }
+        guard speed >= mouseCompanionShakeMinimumSpeed else { return }
 
         let direction = delta > 0 ? 1 : -1
 
@@ -573,6 +569,14 @@ class NotchWindowController: NSWindowController {
 
     private var mouseCompanionShakeDismissEnabled: Bool {
         AttentionAnimationPreferences.resolvedMouseCompanionShakeDismissEnabled()
+    }
+
+    private var mouseCompanionShakeMinimumDistance: CGFloat {
+        AttentionAnimationPreferences.resolvedMouseCompanionShakeMinimumDistance()
+    }
+
+    private var mouseCompanionShakeMinimumSpeed: CGFloat {
+        AttentionAnimationPreferences.resolvedMouseCompanionShakeMinimumSpeed()
     }
 
     private var isOptionModifierPressed: Bool {
