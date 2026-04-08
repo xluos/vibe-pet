@@ -494,9 +494,13 @@ class NotchWindowController: NSWindowController {
             recentShakeTurnTimestamps.append(now)
             recentShakeTurnTimestamps = recentShakeTurnTimestamps.filter { now.timeIntervalSince($0) <= 0.6 }
             if recentShakeTurnTimestamps.count >= 2 {
-                dismissedMouseCompanionSignature = currentMouseCompanionAttentionSignature
                 resetMouseShakeTracking()
-                updateMouseCompanion()
+                if isOptionModifierPressed, completePrimaryAttentionSession() {
+                    dismissedMouseCompanionSignature = nil
+                } else {
+                    dismissedMouseCompanionSignature = currentMouseCompanionAttentionSignature
+                }
+                refreshAttentionUI()
                 return
             }
         } else {
@@ -517,6 +521,19 @@ class NotchWindowController: NSWindowController {
         currentShakeTravel = 0
     }
 
+    private func completePrimaryAttentionSession() -> Bool {
+        guard let session = sessionStore.primaryAttentionSession else { return false }
+        sessionStore.archiveSession(session)
+        return true
+    }
+
+    private func refreshAttentionUI() {
+        if let panel = window as? NSPanel {
+            updateAttentionHalo(relativeTo: panel)
+        }
+        updateMouseCompanion()
+    }
+
     private func haloFrame(relativeTo panelFrame: NSRect) -> NSRect {
         NSRect(
             x: panelFrame.minX - haloSideInset,
@@ -534,10 +551,13 @@ class NotchWindowController: NSWindowController {
     }
 
     private var mouseCompanionMessage: String {
-        if sessionStore.sessions.values.contains(where: { $0.status == .needsApproval }) {
+        guard let session = sessionStore.primaryAttentionSession else {
+            return "提醒"
+        }
+        if session.status == .needsApproval {
             return "待确认"
         }
-        if sessionStore.sessions.values.contains(where: { $0.status == .waitingForInput }) {
+        if session.status == .waitingForInput {
             return "待回复"
         }
         return "提醒"
@@ -553,6 +573,10 @@ class NotchWindowController: NSWindowController {
 
     private var mouseCompanionShakeDismissEnabled: Bool {
         AttentionAnimationPreferences.resolvedMouseCompanionShakeDismissEnabled()
+    }
+
+    private var isOptionModifierPressed: Bool {
+        CGEventSource.flagsState(.combinedSessionState).contains(.maskAlternate)
     }
 
     private var currentMouseCompanionAttentionSignature: String {

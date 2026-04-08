@@ -41,6 +41,20 @@ final class SessionStore {
         sessions.values.contains { $0.status == .needsApproval || $0.status == .waitingForInput }
     }
 
+    var primaryAttentionSession: Session? {
+        sessions.values
+            .filter { $0.status == .needsApproval || $0.status == .waitingForInput }
+            .sorted {
+                let lhsPriority = attentionPriority(for: $0.status)
+                let rhsPriority = attentionPriority(for: $1.status)
+                if lhsPriority != rhsPriority {
+                    return lhsPriority > rhsPriority
+                }
+                return $0.lastEventAt > $1.lastEventAt
+            }
+            .first
+    }
+
     var hasActiveSession: Bool {
         sessions.values.contains { $0.status == .active || $0.status == .starting }
     }
@@ -166,6 +180,17 @@ final class SessionStore {
 
         sessions = sessions.filter { _, session in
             session.status != .ended || session.lastEventAt >= cutoff
+        }
+    }
+
+    private func attentionPriority(for status: SessionStatus) -> Int {
+        switch status {
+        case .needsApproval:
+            return 2
+        case .waitingForInput:
+            return 1
+        default:
+            return 0
         }
     }
 }
