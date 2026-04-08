@@ -36,6 +36,8 @@ struct SettingsWindowView: View {
     @AppStorage("vibepet.soundEnabled") private var soundEnabled = true
     @AppStorage("vibepet.launchAtLogin") private var launchAtLogin = false
     @AppStorage("vibepet.soundVolume") private var soundVolume = 0.5
+    @AppStorage(DisplayPreferences.lockedDisplayIDKey) private var lockedDisplayID = ""
+    @State private var displayOptions = DisplayPreferences.availableDisplays()
 
     var body: some View {
         ScrollView {
@@ -67,6 +69,10 @@ struct SettingsWindowView: View {
                 // General
                 settingsSection("General") {
                     settingsToggleRow("Launch at login", icon: "power", iconColor: .green, isOn: $launchAtLogin)
+                }
+
+                settingsSection("Display") {
+                    settingsDisplayPickerRow("Pinned display", icon: "display.2", iconColor: .indigo)
                 }
 
                 // Hooks
@@ -117,6 +123,10 @@ struct SettingsWindowView: View {
             .padding(.bottom, 20)
         }
         .frame(width: 420, height: 480)
+        .onAppear(perform: reloadDisplays)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            reloadDisplays()
+        }
     }
 
     // MARK: - Section
@@ -189,6 +199,27 @@ struct SettingsWindowView: View {
         AsyncActionButton(label: label, icon: icon, iconColor: iconColor, action: action)
     }
 
+    private func settingsDisplayPickerRow(_ label: String, icon: String, iconColor: Color) -> some View {
+        HStack(spacing: 10) {
+            iconBadge(icon, color: iconColor)
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundColor(.primary)
+            Spacer()
+            Picker("", selection: $lockedDisplayID) {
+                Text("Built-in display (Default)")
+                    .tag("")
+                ForEach(displayOptions) { option in
+                    Text(option.name)
+                        .tag(option.id)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 190)
+        }
+        .frame(height: 32)
+    }
+
     private func iconBadge(_ name: String, color: Color) -> some View {
         Image(systemName: name)
             .font(.system(size: 12, weight: .medium))
@@ -214,6 +245,13 @@ struct SettingsWindowView: View {
             return "Not configured"
         }
         return str.contains("vibe-pet-bridge") ? "Active" : "Not configured"
+    }
+
+    private func reloadDisplays() {
+        displayOptions = DisplayPreferences.availableDisplays()
+        if !lockedDisplayID.isEmpty && !displayOptions.contains(where: { $0.id == lockedDisplayID }) {
+            lockedDisplayID = ""
+        }
     }
 }
 

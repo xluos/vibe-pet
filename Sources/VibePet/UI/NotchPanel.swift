@@ -10,24 +10,26 @@ class NotchWindowController: NSWindowController {
     private var collapsedWidth: CGFloat = 260
     private var collapsedHeight: CGFloat = 33
     private var expandedWidth: CGFloat = 340
-    private let sidePadding: CGFloat = 40
+    private let collapsedLeftRevealWidth: CGFloat = 28
+    private let collapsedRightRevealWidth: CGFloat = 36
+    private let expandedOverflowPerSide: CGFloat = 44
+    private let preferredExpandedExtraWidth: CGFloat = 80
 
     init(sessionStore: SessionStore) {
         self.sessionStore = sessionStore
 
-        let screen = NSScreen.main ?? NSScreen.screens[0]
+        let screen = DisplayPreferences.resolvedScreen()
         let screenFrame = screen.frame
-        let safe = screen.safeAreaInsets
-
-        let leftArea = screen.auxiliaryTopLeftArea ?? .zero
-        let rightArea = screen.auxiliaryTopRightArea ?? .zero
-        let notchWidth = screenFrame.width - leftArea.width - rightArea.width
-        let menuBarHeight = safe.top > 0 ? safe.top : 24
-
-        let hasNotch = safe.top > 0 && notchWidth > 0
-        let cw = hasNotch ? (notchWidth + sidePadding * 2) : 220
-        let ch = hasNotch ? (menuBarHeight + 1) : 25
-        let ew = max(cw + 80, 340)
+        let metrics = Self.metrics(
+            for: screen,
+            collapsedLeftRevealWidth: collapsedLeftRevealWidth,
+            collapsedRightRevealWidth: collapsedRightRevealWidth,
+            expandedOverflowPerSide: expandedOverflowPerSide,
+            preferredExpandedExtraWidth: preferredExpandedExtraWidth
+        )
+        let cw = metrics.collapsedWidth
+        let ch = metrics.collapsedHeight
+        let ew = metrics.expandedWidth
 
         let x = screenFrame.midX - cw / 2
         let y = screenFrame.maxY - ch
@@ -62,9 +64,26 @@ class NotchWindowController: NSWindowController {
             userInfo: nil
         )
         panel.contentView?.addTrackingArea(trackingArea)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleScreenParametersChanged),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleDisplayPreferenceChanged),
+            name: UserDefaults.didChangeNotification,
+            object: nil
+        )
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
 
     private func setupContent() {
         guard let panel = window else { return }
@@ -91,9 +110,6 @@ class NotchWindowController: NSWindowController {
         // Close settings when collapsing
         if !isExpanded { viewModel.showSettings = false }
 
-        let screen = NSScreen.main ?? NSScreen.screens[0]
-        let screenFrame = screen.frame
-
         let sessionCount = sessionStore.allSessions.count
         let expandedContentHeight: CGFloat
         if sessionCount == 0 {
@@ -106,10 +122,7 @@ class NotchWindowController: NSWindowController {
         let w = isExpanded ? expandedWidth : collapsedWidth
         let height = isExpanded ? (collapsedHeight + expandedContentHeight) : collapsedHeight
 
-        let x = screenFrame.midX - w / 2
-        let y = screenFrame.maxY - height
-
-        panel.setFrame(NSRect(x: x, y: y, width: w, height: height), display: true)
+        repositionPanel(panel, width: w, height: height)
 
         withAnimation(.easeOut(duration: 0.15)) {
             viewModel.isExpanded = isExpanded
@@ -120,17 +133,11 @@ class NotchWindowController: NSWindowController {
     func updatePanelSize() {
         guard let panel = window as? NSPanel, let viewModel, isExpanded else { return }
 
-        let screen = NSScreen.main ?? NSScreen.screens[0]
-        let screenFrame = screen.frame
-
         let contentHeight: CGFloat = viewModel.showSettings ? 320 : min(CGFloat(max(sessionStore.allSessions.count, 1) * 52 + 60), 400)
         let height = collapsedHeight + contentHeight
         let w = expandedWidth
 
-        let x = screenFrame.midX - w / 2
-        let y = screenFrame.maxY - height
-
-        panel.setFrame(NSRect(x: x, y: y, width: w, height: height), display: true)
+        repositionPanel(panel, width: w, height: height)
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -143,6 +150,73 @@ class NotchWindowController: NSWindowController {
 
     private func jumpToSession(_ session: Session) {
         TerminalJump.jump(to: session)
+    }
+
+    @objc
+    private func handleScreenParametersChanged() {
+        guard let panel = window as? NSPanel else { return }
+        let screen = DisplayPreferences.resolvedScreen()
+        refreshMetrics(for: screen)
+        let width = isExpanded ? expandedWidth : collapsedWidth
+        let height = panel.frame.height
+        repositionPanel(panel, width: width, height: height)
+    }
+
+    @objc
+    private func handleDisplayPreferenceChanged() {
+        guard let panel = window as? NSPanel else { return }
+        let screen = DisplayPreferences.resolvedScreen()
+        refreshMetrics(for: screen)
+        repositionPanel(panel, width: isExpanded ? expandedWidth : collapsedWidth, height: panel.frame.height)
+    }
+
+    private func repositionPanel(_ panel: NSPanel, width: CGFloat, height: CGFloat) {
+        let screen = DisplayPreferences.resolvedScreen()
+        let screenFrame = screen.frame
+        let x = screenFrame.midX - width / 2
+        let y = screenFrame.maxY - height
+        panel.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
+    }
+
+    private func refreshMetrics(for screen: NSScreen) {
+        let nextMetrics = Self.metrics(
+            for: screen,
+            collapsedLeftRevealWidth: collapsedLeftRevealWidth,
+            collapsedRightRevealWidth: collapsedRightRevealWidth,
+            expandedOverflowPerSide: expandedOverflowPerSide,
+            preferredExpandedExtraWidth: preferredExpandedExtraWidth
+        )
+        collapsedWidth = nextMetrics.collapsedWidth
+        collapsedHeight = nextMetrics.collapsedHeight
+        expandedWidth = nextMetrics.expandedWidth
+    }
+
+    private static func metrics(
+        for screen: NSScreen,
+        collapsedLeftRevealWidth: CGFloat,
+        collapsedRightRevealWidth: CGFloat,
+        expandedOverflowPerSide: CGFloat,
+        preferredExpandedExtraWidth: CGFloat
+    ) -> (collapsedWidth: CGFloat, collapsedHeight: CGFloat, expandedWidth: CGFloat) {
+        let menuBarHeight = screen.menuBarHeight
+        let hasNotch = screen.hasUsableNotch
+        let collapsedWidth = hasNotch
+            ? (screen.notchWidth + collapsedLeftRevealWidth + collapsedRightRevealWidth)
+            : 220
+        let collapsedHeight = hasNotch ? (menuBarHeight + 1) : 25
+
+        let preferredExpandedWidth = max(collapsedWidth + preferredExpandedExtraWidth, 340)
+        let expandedWidth: CGFloat
+        if hasNotch {
+            expandedWidth = max(
+                preferredExpandedWidth,
+                screen.centeredWidth(overflowPerSide: expandedOverflowPerSide)
+            )
+        } else {
+            expandedWidth = preferredExpandedWidth
+        }
+
+        return (collapsedWidth, collapsedHeight, expandedWidth)
     }
 }
 

@@ -60,26 +60,28 @@ struct NotchContentView: View {
     // MARK: - Collapsed bar
 
     private var capsuleBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             PetView(state: derivePetState())
-                .frame(width: 16, height: 16)
+                .frame(width: 15, height: 15)
 
             Spacer()
 
             if !sessionStore.activeSessions.isEmpty {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 6, height: 6)
-                Text("\(sessionStore.activeSessions.count)")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.white)
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 5, height: 5)
+                    Text("\(sessionStore.activeSessions.count)")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.white)
+                }
             } else {
                 Circle()
                     .fill(Color.white.opacity(0.3))
-                    .frame(width: 5, height: 5)
+                    .frame(width: 4, height: 4)
             }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 8)
         .frame(height: 33)
     }
 
