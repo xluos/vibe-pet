@@ -3,7 +3,8 @@ import AppKit
 
 class NotchWindowController: NSWindowController {
     private let sessionStore: SessionStore
-    private var isExpanded = false
+    private var expandedPresentation: NotchExpandedPresentation = .collapsed
+    private var transientPresentationScreen: NSScreen?
     private var hostingView: NSHostingView<NotchRootView>?
     private var viewModel: NotchViewModel?
     private var haloPanel: NSPanel?
@@ -18,6 +19,10 @@ class NotchWindowController: NSWindowController {
     private var recentShakeTurnTimestamps: [Date] = []
     private var currentShakeTravel: CGFloat = 0
     private var dismissedMouseCompanionSignature: String?
+    private var proactiveAttentionCollapseTimer: Timer?
+    private var acknowledgedAttentionStatuses: [String: SessionStatus] = [:]
+    private var isMouseInsidePanel = false
+    private var pendingPanelRefreshWorkItem: DispatchWorkItem?
 
     private var collapsedWidth: CGFloat = 260
     private var collapsedHeight: CGFloat = 33
@@ -113,6 +118,8 @@ class NotchWindowController: NSWindowController {
     deinit {
         NotificationCenter.default.removeObserver(self)
         mouseTrackingTimer?.invalidate()
+        proactiveAttentionCollapseTimer?.invalidate()
+        pendingPanelRefreshWorkItem?.cancel()
     }
 
     private func setupContent() {
@@ -122,6 +129,8 @@ class NotchWindowController: NSWindowController {
             notchWidth: collapsedWidth,
             notchHeight: collapsedHeight,
             onSessionClick: { [weak self] session in self?.jumpToSession(session) },
+            onAttentionRead: { [weak self] session in self?.markAttentionSessionRead(session) },
+            onAttentionArchive: { [weak self] session in self?.archiveAttentionSession(session) },
             onQuit: { NSApplication.shared.terminate(nil) }
         )
         self.viewModel = vm
@@ -139,39 +148,75 @@ class NotchWindowController: NSWindowController {
     }
 
     func toggleExpanded() {
-        isExpanded.toggle()
+        if isExpanded {
+            collapseExpanded()
+        } else {
+            expand(.manual)
+        }
+    }
+
+    private func expand(_ presentation: NotchExpandedPresentation) {
         guard let panel = window as? NSPanel, let viewModel else { return }
+        if presentation == .transientAttention, let focusScreen = focusScreenForTransientAttention() {
+            transientPresentationScreen = focusScreen
+            refreshMetrics(for: focusScreen)
+        }
+        expandedPresentation = presentation
+        proactiveAttentionCollapseTimer?.invalidate()
 
         // Close settings when collapsing
-        if !isExpanded { viewModel.showSettings = false }
-
-        let sessionCount = sessionStore.allSessions.count
-        let expandedContentHeight: CGFloat
-        if sessionCount == 0 {
-            expandedContentHeight = 80
-        } else {
-            // Estimate: header(44) + rows + padding
-            let perRow: CGFloat = 70
-            expandedContentHeight = min(44 + CGFloat(sessionCount) * perRow + 12, 420)
+        if presentation == .transientAttention {
+            viewModel.showSettings = false
         }
-        let w = isExpanded ? expandedWidth : collapsedWidth
-        let height = isExpanded ? (collapsedHeight + expandedContentHeight) : collapsedHeight
+
+        syncAttentionPresentation()
+
+        let height = collapsedHeight + expandedContentHeight
+        let w = expandedWidth
 
         repositionPanel(panel, width: w, height: height)
         updateAttentionHalo(relativeTo: panel)
         updateMouseCompanion()
 
         withAnimation(.easeOut(duration: 0.15)) {
-            viewModel.isExpanded = isExpanded
+            viewModel.isExpanded = true
+        }
+
+        if presentation == .transientAttention {
+            scheduleProactiveAttentionCollapse()
+        }
+    }
+
+    private func collapseExpanded(resetSettings: Bool = true) {
+        guard let panel = window as? NSPanel, let viewModel else { return }
+        let wasTransientAttention = expandedPresentation == .transientAttention
+        proactiveAttentionCollapseTimer?.invalidate()
+        expandedPresentation = .collapsed
+        viewModel.attentionPresentation = .hidden
+        viewModel.attentionSessionIDs = []
+        if wasTransientAttention {
+            transientPresentationScreen = nil
+            refreshMetrics(for: preferredScreen)
+        }
+
+        if resetSettings {
+            viewModel.showSettings = false
+        }
+
+        repositionPanel(panel, width: collapsedWidth, height: collapsedHeight)
+        updateAttentionHalo(relativeTo: panel)
+        updateMouseCompanion()
+
+        withAnimation(.easeOut(duration: 0.15)) {
+            viewModel.isExpanded = false
         }
     }
 
     /// Resize panel when switching to/from settings
     func updatePanelSize() {
-        guard let panel = window as? NSPanel, let viewModel, isExpanded else { return }
+        guard let panel = window as? NSPanel, isExpanded else { return }
 
-        let contentHeight: CGFloat = viewModel.showSettings ? 320 : min(CGFloat(max(sessionStore.allSessions.count, 1) * 52 + 60), 400)
-        let height = collapsedHeight + contentHeight
+        let height = collapsedHeight + expandedContentHeight
         let w = expandedWidth
 
         repositionPanel(panel, width: w, height: height)
@@ -180,11 +225,25 @@ class NotchWindowController: NSWindowController {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        if !isExpanded { toggleExpanded() }
+        isMouseInsidePanel = true
+        if expandedPresentation == .transientAttention {
+            proactiveAttentionCollapseTimer?.invalidate()
+            return
+        }
+        if !isExpanded {
+            expand(.manual)
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
-        if isExpanded { toggleExpanded() }
+        isMouseInsidePanel = false
+        if expandedPresentation == .transientAttention {
+            scheduleProactiveAttentionCollapse()
+            return
+        }
+        if expandedPresentation == .manual {
+            collapseExpanded()
+        }
     }
 
     private func jumpToSession(_ session: Session) {
@@ -193,31 +252,40 @@ class NotchWindowController: NSWindowController {
 
     @objc
     private func handleScreenParametersChanged() {
-        guard let panel = window as? NSPanel else { return }
-        let screen = DisplayPreferences.resolvedScreen()
-        refreshMetrics(for: screen)
-        let width = isExpanded ? expandedWidth : collapsedWidth
-        let height = panel.frame.height
-        repositionPanel(panel, width: width, height: height)
-        updateAttentionHalo(relativeTo: panel)
-        updateMouseCompanion()
+        schedulePanelRefresh()
     }
 
     @objc
     private func handleDisplayPreferenceChanged() {
-        guard let panel = window as? NSPanel else { return }
-        let screen = DisplayPreferences.resolvedScreen()
-        refreshMetrics(for: screen)
-        repositionPanel(panel, width: isExpanded ? expandedWidth : collapsedWidth, height: panel.frame.height)
-        updateAttentionHalo(relativeTo: panel)
-        updateMouseCompanion()
+        schedulePanelRefresh()
     }
 
     @objc
-    private func handleSessionStatusChanged() {
+    private func handleSessionStatusChanged(_ notification: Notification) {
         guard let panel = window as? NSPanel else { return }
+        pruneAcknowledgedAttentionSessions()
+        syncAttentionPresentation()
         updateAttentionHalo(relativeTo: panel)
         updateMouseCompanion()
+
+        if viewModel?.showSettings == true, isExpanded {
+            updatePanelSize()
+        }
+
+        let oldStatus = SessionStatus(rawValue: notification.userInfo?["oldStatus"] as? String ?? "")
+        let newStatus = SessionStatus(rawValue: notification.userInfo?["newStatus"] as? String ?? "")
+        if shouldShowProactiveAttentionPopup(oldStatus: oldStatus, newStatus: newStatus) {
+            showProactiveAttentionPopup()
+            return
+        }
+
+        if expandedPresentation == .transientAttention {
+            if visibleAttentionSessions.isEmpty {
+                collapseExpanded()
+            } else {
+                updatePanelSize()
+            }
+        }
     }
 
     @objc
@@ -226,7 +294,7 @@ class NotchWindowController: NSWindowController {
     }
 
     private func repositionPanel(_ panel: NSPanel, width: CGFloat, height: CGFloat) {
-        let screen = DisplayPreferences.resolvedScreen()
+        let screen = activeScreen
         let screenFrame = screen.frame
         let x = screenFrame.midX - width / 2
         let y = screenFrame.maxY - height
@@ -246,6 +314,24 @@ class NotchWindowController: NSWindowController {
         expandedWidth = nextMetrics.expandedWidth
         viewModel?.notchWidth = nextMetrics.collapsedWidth
         viewModel?.notchHeight = nextMetrics.collapsedHeight
+    }
+
+    private func schedulePanelRefresh() {
+        pendingPanelRefreshWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, let panel = self.window as? NSPanel else { return }
+            let screen = self.activeScreen
+            self.refreshMetrics(for: screen)
+            let width = self.isExpanded ? self.expandedWidth : self.collapsedWidth
+            let height = self.isExpanded ? (self.collapsedHeight + self.expandedContentHeight) : self.collapsedHeight
+            self.repositionPanel(panel, width: width, height: height)
+            self.updateAttentionHalo(relativeTo: panel)
+            self.updateMouseCompanion()
+        }
+
+        pendingPanelRefreshWorkItem = workItem
+        DispatchQueue.main.async(execute: workItem)
     }
 
     private func setupHaloWindow(relativeTo panel: NSPanel) {
@@ -602,6 +688,117 @@ class NotchWindowController: NSWindowController {
             .joined(separator: "|")
     }
 
+    private var isExpanded: Bool {
+        expandedPresentation != .collapsed
+    }
+
+    private var preferredScreen: NSScreen {
+        DisplayPreferences.resolvedScreen()
+    }
+
+    private var activeScreen: NSScreen {
+        transientPresentationScreen ?? preferredScreen
+    }
+
+    private var visibleAttentionSessions: [Session] {
+        sessionStore.attentionSessions.filter { session in
+            acknowledgedAttentionStatuses[session.id] != session.status
+        }
+    }
+
+    private var expandedContentHeight: CGFloat {
+        guard let viewModel else { return 80 }
+        if viewModel.showSettings {
+            return 320
+        }
+
+        if expandedPresentation == .transientAttention {
+            let count = max(visibleAttentionSessions.count, 1)
+            let perRow: CGFloat = 152
+            let headerHeight: CGFloat = 41
+            let dividerHeight: CGFloat = 1
+            let verticalPadding: CGFloat = 24
+            let basePadding = headerHeight + dividerHeight + verticalPadding
+            return CGFloat(count) * perRow + basePadding
+        }
+
+        let count = max(sessionStore.allSessions.count, 1)
+        return min(CGFloat(count) * 52 + 60, 400)
+    }
+
+    private func shouldShowProactiveAttentionPopup(oldStatus: SessionStatus?, newStatus: SessionStatus?) -> Bool {
+        guard AttentionAnimationPreferences.resolvedProactivePopupEnabled() else { return false }
+        guard let newStatus else { return false }
+        guard newStatus == .waitingForInput || newStatus == .needsApproval else { return false }
+        return oldStatus != newStatus
+    }
+
+    private func showProactiveAttentionPopup() {
+        guard !visibleAttentionSessions.isEmpty else { return }
+        expand(.transientAttention)
+    }
+
+    private func focusScreenForTransientAttention() -> NSScreen? {
+        DisplayPreferences.screenContainingMouse() ?? preferredScreen
+    }
+
+    private func scheduleProactiveAttentionCollapse() {
+        proactiveAttentionCollapseTimer?.invalidate()
+        guard expandedPresentation == .transientAttention else { return }
+        guard !isMouseInsideTransientAttentionPanel else { return }
+        let delay = AttentionAnimationPreferences.resolvedProactivePopupAutoCollapseDelay()
+        proactiveAttentionCollapseTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            guard let self, self.expandedPresentation == .transientAttention else { return }
+            guard !self.isMouseInsideTransientAttentionPanel else {
+                self.isMouseInsidePanel = true
+                return
+            }
+            self.collapseExpanded()
+        }
+        if let proactiveAttentionCollapseTimer {
+            RunLoop.main.add(proactiveAttentionCollapseTimer, forMode: .common)
+        }
+    }
+
+    private func syncAttentionPresentation() {
+        guard let viewModel else { return }
+        if expandedPresentation == .transientAttention {
+            viewModel.attentionPresentation = .transient
+            viewModel.attentionSessionIDs = visibleAttentionSessions.map(\.id)
+        } else {
+            viewModel.attentionPresentation = .hidden
+            viewModel.attentionSessionIDs = []
+        }
+    }
+
+    private func pruneAcknowledgedAttentionSessions() {
+        acknowledgedAttentionStatuses = acknowledgedAttentionStatuses.filter { sessionID, status in
+            guard let session = sessionStore.sessions[sessionID] else { return false }
+            return session.status == status && (status == .needsApproval || status == .waitingForInput)
+        }
+    }
+
+    private func markAttentionSessionRead(_ session: Session) {
+        acknowledgedAttentionStatuses[session.id] = session.status
+        syncAttentionPresentation()
+        if visibleAttentionSessions.isEmpty, expandedPresentation == .transientAttention {
+            collapseExpanded()
+        } else if expandedPresentation == .transientAttention {
+            updatePanelSize()
+        }
+    }
+
+    private func archiveAttentionSession(_ session: Session) {
+        acknowledgedAttentionStatuses.removeValue(forKey: session.id)
+        sessionStore.archiveSession(session)
+    }
+
+    private var isMouseInsideTransientAttentionPanel: Bool {
+        guard expandedPresentation == .transientAttention,
+              let panel = window as? NSPanel else { return false }
+        return NSMouseInRect(NSEvent.mouseLocation, panel.frame, false)
+    }
+
     private static func metrics(
         for screen: NSScreen,
         collapsedLeftRevealWidth: CGFloat,
@@ -629,6 +826,12 @@ class NotchWindowController: NSWindowController {
 
         return (collapsedWidth, collapsedHeight, expandedWidth)
     }
+}
+
+private enum NotchExpandedPresentation {
+    case collapsed
+    case manual
+    case transientAttention
 }
 
 private struct MouseTrackingSample {
@@ -823,15 +1026,34 @@ class NotchViewModel {
     var notchWidth: CGFloat
     var notchHeight: CGFloat
     let onSessionClick: (Session) -> Void
+    let onAttentionRead: (Session) -> Void
+    let onAttentionArchive: (Session) -> Void
     let onQuit: () -> Void
     var isExpanded: Bool = false
     var showSettings: Bool = false
+    var attentionPresentation: AttentionPanelPresentation = .hidden
+    var attentionSessionIDs: [String] = []
 
-    init(sessionStore: SessionStore, notchWidth: CGFloat, notchHeight: CGFloat, onSessionClick: @escaping (Session) -> Void, onQuit: @escaping () -> Void) {
+    init(
+        sessionStore: SessionStore,
+        notchWidth: CGFloat,
+        notchHeight: CGFloat,
+        onSessionClick: @escaping (Session) -> Void,
+        onAttentionRead: @escaping (Session) -> Void,
+        onAttentionArchive: @escaping (Session) -> Void,
+        onQuit: @escaping () -> Void
+    ) {
         self.sessionStore = sessionStore
         self.notchWidth = notchWidth
         self.notchHeight = notchHeight
         self.onSessionClick = onSessionClick
+        self.onAttentionRead = onAttentionRead
+        self.onAttentionArchive = onAttentionArchive
         self.onQuit = onQuit
     }
+}
+
+enum AttentionPanelPresentation {
+    case hidden
+    case transient
 }

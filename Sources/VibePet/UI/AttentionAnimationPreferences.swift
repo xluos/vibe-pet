@@ -95,6 +95,8 @@ enum AttentionAnimationPreferences {
     static let styleKey = "vibepet.strongAttentionAnimationStyle"
     static let soundEnabledKey = "vibepet.strongAttentionAnimationSoundEnabled"
     static let soundCadenceKey = "vibepet.strongAttentionAnimationSoundCadence"
+    static let proactivePopupEnabledKey = "vibepet.proactiveAttentionPopupEnabled"
+    static let proactivePopupAutoCollapseDelayKey = "vibepet.proactiveAttentionPopupAutoCollapseDelay"
     static let mouseCompanionCatEnabledKey = "vibepet.mouseCompanionCatEnabled"
     static let mouseCompanionBubbleEnabledKey = "vibepet.mouseCompanionBubbleEnabled"
     static let mouseCompanionShakeDismissEnabledKey = "vibepet.mouseCompanionShakeDismissEnabled"
@@ -103,6 +105,7 @@ enum AttentionAnimationPreferences {
     static let defaultStrongStyle: AttentionAnimationVariant = .urgentPulse
     static let defaultSoundCadence: AttentionReminderSoundCadence = .everyCycle
     static let cycleDuration: TimeInterval = 1.5
+    static let defaultProactivePopupAutoCollapseDelay: TimeInterval = 2.5
     static let defaultMouseCompanionShakeMinimumDistance: Double = 22
     static let defaultMouseCompanionShakeMinimumSpeed: Double = 1650
 
@@ -130,6 +133,20 @@ enum AttentionAnimationPreferences {
 
     static func resolvedSoundCadence(defaults: UserDefaults = .standard) -> AttentionReminderSoundCadence {
         AttentionReminderSoundCadence(rawValue: defaults.string(forKey: soundCadenceKey) ?? "") ?? defaultSoundCadence
+    }
+
+    static func resolvedProactivePopupEnabled(defaults: UserDefaults = .standard) -> Bool {
+        if defaults.object(forKey: proactivePopupEnabledKey) != nil {
+            return defaults.bool(forKey: proactivePopupEnabledKey)
+        }
+        return true
+    }
+
+    static func resolvedProactivePopupAutoCollapseDelay(defaults: UserDefaults = .standard) -> TimeInterval {
+        if defaults.object(forKey: proactivePopupAutoCollapseDelayKey) != nil {
+            return defaults.double(forKey: proactivePopupAutoCollapseDelayKey)
+        }
+        return defaultProactivePopupAutoCollapseDelay
     }
 
     static func resolvedMouseCompanionCatEnabled(defaults: UserDefaults = .standard) -> Bool {

@@ -43,12 +43,16 @@ struct SettingsWindowView: View {
     @AppStorage(AttentionAnimationPreferences.styleKey) private var strongAttentionAnimationStyleRawValue = AttentionAnimationPreferences.defaultStrongStyle.rawValue
     @AppStorage(AttentionAnimationPreferences.soundEnabledKey) private var strongAttentionAnimationSoundEnabledStored = true
     @AppStorage(AttentionAnimationPreferences.soundCadenceKey) private var strongAttentionAnimationSoundCadenceRawValue = AttentionAnimationPreferences.defaultSoundCadence.rawValue
+    @AppStorage(AttentionAnimationPreferences.proactivePopupEnabledKey) private var proactiveAttentionPopupEnabled = true
+    @AppStorage(AttentionAnimationPreferences.proactivePopupAutoCollapseDelayKey) private var proactiveAttentionPopupAutoCollapseDelay = AttentionAnimationPreferences.defaultProactivePopupAutoCollapseDelay
     @AppStorage(AttentionAnimationPreferences.mouseCompanionCatEnabledKey) private var mouseCompanionCatEnabled = true
     @AppStorage(AttentionAnimationPreferences.mouseCompanionBubbleEnabledKey) private var mouseCompanionBubbleEnabled = true
     @AppStorage(AttentionAnimationPreferences.mouseCompanionShakeDismissEnabledKey) private var mouseCompanionShakeDismissEnabled = true
     @AppStorage(AttentionAnimationPreferences.mouseCompanionShakeMinimumDistanceKey) private var mouseCompanionShakeMinimumDistance = AttentionAnimationPreferences.defaultMouseCompanionShakeMinimumDistance
     @AppStorage(AttentionAnimationPreferences.mouseCompanionShakeMinimumSpeedKey) private var mouseCompanionShakeMinimumSpeed = AttentionAnimationPreferences.defaultMouseCompanionShakeMinimumSpeed
     @State private var displayOptions = DisplayPreferences.availableDisplays()
+    @State private var proactiveAttentionPopupDelayText = String(format: "%.1f", AttentionAnimationPreferences.defaultProactivePopupAutoCollapseDelay)
+    @FocusState private var isProactivePopupDelayFieldFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -99,6 +103,12 @@ struct SettingsWindowView: View {
                             Divider().padding(.leading, 40)
                             settingsAttentionSoundCadenceRow(L10n.tr("settings.soundCadence"), icon: "metronome", iconColor: .orange)
                         }
+                    }
+                    Divider().padding(.leading, 40)
+                    settingsToggleRow(L10n.tr("settings.proactiveAttentionPopup"), icon: "rectangle.expand.vertical", iconColor: .yellow, isOn: $proactiveAttentionPopupEnabled)
+                    if proactiveAttentionPopupEnabled {
+                        Divider().padding(.leading, 40)
+                        settingsProactivePopupDelayRow(L10n.tr("settings.proactiveAttentionPopupDelay"), icon: "timer", iconColor: .yellow)
                     }
                 }
 
@@ -163,9 +173,22 @@ struct SettingsWindowView: View {
         }
         .frame(width: 420, height: 660)
         .id(languageRefreshID)
-        .onAppear(perform: reloadDisplays)
+        .onAppear {
+            reloadDisplays()
+            syncProactivePopupDelayText()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
             reloadDisplays()
+        }
+        .onChange(of: proactiveAttentionPopupAutoCollapseDelay) { _, _ in
+            if !isProactivePopupDelayFieldFocused {
+                syncProactivePopupDelayText()
+            }
+        }
+        .onChange(of: isProactivePopupDelayFieldFocused) { _, isFocused in
+            if !isFocused {
+                commitProactivePopupDelayText()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: L10n.languageDidChangeNotification)) { _ in
             languageRefreshID = UUID()
@@ -228,12 +251,26 @@ struct SettingsWindowView: View {
     }
 
     private func shakePresetButton(_ title: String, distance: Double, speed: Double) -> some View {
-        Button(title) {
+        let isSelected = abs(mouseCompanionShakeMinimumDistance - distance) < 0.01
+            && abs(mouseCompanionShakeMinimumSpeed - speed) < 0.01
+
+        return Button(title) {
             mouseCompanionShakeMinimumDistance = distance
             mouseCompanionShakeMinimumSpeed = speed
         }
-        .buttonStyle(.bordered)
-        .controlSize(.mini)
+        .buttonStyle(.plain)
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundColor(isSelected ? .white : .primary)
+        .padding(.horizontal, 10)
+        .frame(height: 24)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(isSelected ? Color.accentColor : Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(isSelected ? Color.accentColor.opacity(0.9) : Color.primary.opacity(0.12), lineWidth: 1)
+        )
     }
 
     private func settingsSliderRow(_ label: String, icon: String, iconColor: Color, value: Binding<Double>) -> some View {
@@ -345,6 +382,28 @@ struct SettingsWindowView: View {
         .frame(height: 32)
     }
 
+    private func settingsProactivePopupDelayRow(_ label: String, icon: String, iconColor: Color) -> some View {
+        HStack(spacing: 10) {
+            iconBadge(icon, color: iconColor)
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundColor(.primary)
+            Spacer()
+            TextField("", text: proactiveAttentionPopupAutoCollapseDelayTextBinding)
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 86)
+                .focused($isProactivePopupDelayFieldFocused)
+                .onSubmit {
+                    commitProactivePopupDelayText()
+                }
+            Text(L10n.tr("settings.secondsUnit"))
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+        }
+        .frame(height: 32)
+    }
+
     private func iconBadge(_ name: String, color: Color) -> some View {
         Image(systemName: name)
             .font(.system(size: 12, weight: .medium))
@@ -417,6 +476,37 @@ struct SettingsWindowView: View {
             get: { appLanguage },
             set: { L10n.setLanguage($0) }
         )
+    }
+
+    private var proactiveAttentionPopupAutoCollapseDelayTextBinding: Binding<String> {
+        Binding(
+            get: { proactiveAttentionPopupDelayText },
+            set: { newValue in
+                proactiveAttentionPopupDelayText = newValue
+            }
+        )
+    }
+
+    private func syncProactivePopupDelayText() {
+        proactiveAttentionPopupDelayText = String(format: "%.1f", proactiveAttentionPopupAutoCollapseDelay)
+    }
+
+    private func commitProactivePopupDelayText() {
+        guard let value = sanitizedPopupDelay(from: proactiveAttentionPopupDelayText) else {
+            syncProactivePopupDelayText()
+            return
+        }
+        proactiveAttentionPopupAutoCollapseDelay = value
+        proactiveAttentionPopupDelayText = String(format: "%.1f", value)
+    }
+
+    private func sanitizedPopupDelay(from text: String) -> Double? {
+        let normalized = text
+            .replacingOccurrences(of: ",", with: ".")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Double(normalized) else { return nil }
+        let clamped = min(max(value, 0.5), 15.0)
+        return (clamped * 10).rounded() / 10
     }
 }
 

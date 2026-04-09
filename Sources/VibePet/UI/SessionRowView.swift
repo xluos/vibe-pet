@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SessionRowView: View {
     let session: Session
+    var variant: SessionRowVariant = .standard
+    var onMarkRead: (() -> Void)?
     var onArchive: (() -> Void)?
     @AppStorage(L10n.languageKey) private var appLanguage = ""
     @State private var languageRefreshID = UUID()
@@ -10,22 +12,21 @@ struct SessionRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Top row: source badge, status, cwd, title, time, archive
             HStack(spacing: 6) {
                 Text(sourceBadge)
-                    .font(.system(size: 7, weight: .bold, design: .monospaced))
+                    .font(.system(size: variant.badgeFontSize, weight: .bold, design: .monospaced))
                     .foregroundColor(.black)
-                    .frame(width: 22, height: 18)
+                    .frame(width: variant.badgeWidth, height: variant.badgeHeight)
                     .background(sourceColor)
                     .clipShape(RoundedRectangle(cornerRadius: 3))
 
                 Circle()
                     .fill(statusColor)
-                    .frame(width: 6, height: 6)
+                    .frame(width: variant.statusDotSize, height: variant.statusDotSize)
 
                 HStack(spacing: 4) {
                     Text(cwdLabel)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(.system(size: variant.titleFontSize, weight: .medium, design: .monospaced))
                         .foregroundColor(.white)
                         .lineLimit(1)
 
@@ -35,7 +36,7 @@ struct SessionRowView: View {
                             .foregroundColor(.gray)
 
                         Text(title)
-                            .font(.system(size: 10))
+                            .font(.system(size: max(variant.titleFontSize - 1, 10)))
                             .foregroundColor(.gray)
                             .lineLimit(1)
                     }
@@ -44,10 +45,10 @@ struct SessionRowView: View {
                 Spacer()
 
                 Text(timeAgo)
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(.system(size: variant.timeFontSize, design: .monospaced))
                     .foregroundColor(.gray)
 
-                if let onArchive, session.status != .archived {
+                if variant == .standard, let onArchive, session.status != .archived {
                     Button(action: onArchive) {
                         Image(systemName: "archivebox")
                             .font(.system(size: 10))
@@ -57,43 +58,77 @@ struct SessionRowView: View {
                 }
             }
 
-            // Status line
             Text(statusLabel)
-                .font(.system(size: 9, design: .monospaced))
+                .font(.system(size: variant.statusFontSize, weight: variant == .attention ? .medium : .regular, design: .monospaced))
                 .foregroundColor(.gray)
                 .lineLimit(1)
 
-            // User prompt
             if let prompt = session.lastPrompt, !prompt.isEmpty {
                 HStack(spacing: 4) {
                     Image(systemName: "person.fill")
-                        .font(.system(size: 8))
+                        .font(.system(size: variant.metaIconSize))
                         .foregroundColor(.cyan.opacity(0.6))
                     Text(prompt)
-                        .font(.system(size: 10))
+                        .font(.system(size: variant.bodyFontSize))
                         .foregroundColor(.white.opacity(0.7))
-                        .lineLimit(2)
+                        .lineLimit(variant.bodyLineLimit)
+                        .truncationMode(.tail)
                 }
             }
 
-            // Assistant response
             if let response = session.lastAssistantMessage, !response.isEmpty {
                 HStack(alignment: .top, spacing: 4) {
                     Image(systemName: "sparkles")
-                        .font(.system(size: 8))
+                        .font(.system(size: variant.metaIconSize))
                         .foregroundColor(.orange.opacity(0.6))
                     Text(response)
-                        .font(.system(size: 10))
+                        .font(.system(size: variant.bodyFontSize))
                         .foregroundColor(.white.opacity(0.5))
-                        .lineLimit(2)
+                        .lineLimit(variant.bodyLineLimit)
+                        .truncationMode(.tail)
                 }
             }
+
+            if variant == .attention {
+                HStack(spacing: 10) {
+                    if let onMarkRead {
+                        Button(action: onMarkRead) {
+                            Text(L10n.tr("session.action.markRead"))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 34)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 9)
+                                        .fill(Color.white.opacity(0.12))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if let onArchive, session.status != .archived {
+                        Button(action: onArchive) {
+                            Text(L10n.tr("session.action.archive"))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.black)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 34)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 9)
+                                        .fill(Color(red: 1.0, green: 0.78, blue: 0.18))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 6)
+            }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.horizontal, variant.horizontalPadding)
+        .padding(.vertical, variant.verticalPadding)
         .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.white.opacity(0.05))
+            RoundedRectangle(cornerRadius: variant.cornerRadius)
+                .fill(variant == .attention ? Color.white.opacity(0.08) : Color.white.opacity(0.05))
         )
         .id(languageRefreshID)
         .contentShape(Rectangle())
@@ -171,4 +206,23 @@ struct SessionRowView: View {
         if interval < 3600 { return "\(Int(interval / 60))m" }
         return "\(Int(interval / 3600))h"
     }
+}
+
+enum SessionRowVariant {
+    case standard
+    case attention
+
+    var badgeFontSize: CGFloat { self == .attention ? 8 : 7 }
+    var badgeWidth: CGFloat { self == .attention ? 26 : 22 }
+    var badgeHeight: CGFloat { self == .attention ? 20 : 18 }
+    var statusDotSize: CGFloat { self == .attention ? 8 : 6 }
+    var titleFontSize: CGFloat { self == .attention ? 12 : 11 }
+    var timeFontSize: CGFloat { self == .attention ? 10 : 9 }
+    var statusFontSize: CGFloat { self == .attention ? 11 : 9 }
+    var metaIconSize: CGFloat { self == .attention ? 9 : 8 }
+    var bodyFontSize: CGFloat { self == .attention ? 11 : 10 }
+    var bodyLineLimit: Int { 2 }
+    var horizontalPadding: CGFloat { self == .attention ? 12 : 8 }
+    var verticalPadding: CGFloat { self == .attention ? 10 : 6 }
+    var cornerRadius: CGFloat { self == .attention ? 10 : 6 }
 }

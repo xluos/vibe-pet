@@ -20,6 +20,10 @@
 "settings.effect" = "Effect";
 "settings.reminderSound" = "Reminder sound";
 "settings.soundCadence" = "Sound cadence";
+"settings.proactiveAttentionPopup" = "Auto-expand attention panel";
+"settings.proactiveAttentionPopupDelay" = "Auto-collapse delay";
+"settings.proactiveAttentionPopupDelay.seconds" = "%.1f s";
+"settings.secondsUnit" = "s";
 "settings.cadence" = "Cadence";
 "settings.attentionDisabledHint" = "Disabled: use the default subtle attention animation.";
 "settings.mouseCat" = "Mouse cat";
@@ -46,6 +50,9 @@
 "mouseCompanion.needsApproval" = "Needs approval";
 "mouseCompanion.waitingInput" = "Awaiting reply";
 "notch.noActiveSessions" = "No active sessions";
+"notch.attentionPanelTitle" = "%d awaiting action";
+"notch.attentionPanelHint" = "Tap Read or Archive directly. Without interaction it auto-collapses in about 2.5 seconds.";
+"notch.attentionPanelHint.dynamic" = "Tap Read or Archive directly. Without interaction it auto-collapses in about %.1f seconds.";
 "display.builtin" = "Built-in display";
 "display.external.indexed" = "External display %d";
 "attention.variant.subtle.name" = "Default";
@@ -70,3 +77,5 @@
 "session.status.needsApproval" = "needs approval!";
 "session.status.ended" = "ended";
 "session.status.archived" = "archived";
+"session.action.markRead" = "Read";
+"session.action.archive" = "Archive";

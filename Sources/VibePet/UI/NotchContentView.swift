@@ -205,6 +205,15 @@ struct NotchContentView: View {
 
     private var sessionStore: SessionStore { viewModel.sessionStore }
     private var isExpanded: Bool { viewModel.isExpanded }
+    private var attentionSessions: [Session] {
+        viewModel.attentionSessionIDs.compactMap { sessionStore.sessions[$0] }
+    }
+    private var showsTransientAttentionPanel: Bool {
+        viewModel.attentionPresentation == .transient && !attentionSessions.isEmpty
+    }
+    private var proactivePopupAutoCollapseDelay: TimeInterval {
+        AttentionAnimationPreferences.resolvedProactivePopupAutoCollapseDelay()
+    }
 
     var body: some View {
         let shape = NotchExtensionShape(bottomRadius: isExpanded ? 18 : 10)
@@ -274,7 +283,11 @@ struct NotchContentView: View {
                 .fill(Color.white.opacity(0.06))
                 .frame(height: 0.5)
 
-            sessionList
+            if showsTransientAttentionPanel {
+                attentionSessionList
+            } else {
+                sessionList
+            }
         }
     }
 
@@ -286,6 +299,16 @@ struct NotchContentView: View {
             Text(L10n.tr("app.name"))
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundColor(.white)
+
+            if showsTransientAttentionPanel {
+                Text(L10n.tr("notch.attentionPanelTitle", attentionSessions.count))
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundColor(attentionAccentColor.opacity(0.95))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(attentionAccentColor.opacity(0.14))
+                    .clipShape(Capsule())
+            }
 
             Spacer()
 
@@ -336,6 +359,24 @@ struct NotchContentView: View {
                     .padding(.vertical, 6)
                 }
             }
+        }
+    }
+
+    private var attentionSessionList: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(attentionSessions) { session in
+                    SessionRowView(
+                        session: session,
+                        variant: .attention,
+                        onMarkRead: { viewModel.onAttentionRead(session) },
+                        onArchive: { viewModel.onAttentionArchive(session) }
+                    )
+                    .onTapGesture { viewModel.onSessionClick(session) }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
         }
     }
 

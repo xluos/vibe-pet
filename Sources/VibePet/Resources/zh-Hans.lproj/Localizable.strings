@@ -20,6 +20,10 @@
 "settings.effect" = "效果";
 "settings.reminderSound" = "提醒音";
 "settings.soundCadence" = "播放频率";
+"settings.proactiveAttentionPopup" = "主动弹出提醒面板";
+"settings.proactiveAttentionPopupDelay" = "自动收起时间";
+"settings.proactiveAttentionPopupDelay.seconds" = "%.1f 秒";
+"settings.secondsUnit" = "秒";
 "settings.cadence" = "频率";
 "settings.attentionDisabledHint" = "关闭后使用默认弱提醒动画";
 "settings.mouseCat" = "鼠标跟随";
@@ -46,6 +50,9 @@
 "mouseCompanion.needsApproval" = "待确认";
 "mouseCompanion.waitingInput" = "待回复";
 "notch.noActiveSessions" = "暂无活跃会话";
+"notch.attentionPanelTitle" = "%d 条待处理";
+"notch.attentionPanelHint" = "可直接点击“已读”或“归档”，不操作会在约 2.5 秒后自动收起。";
+"notch.attentionPanelHint.dynamic" = "可直接点击“已读”或“归档”，不操作会在约 %.1f 秒后自动收起。";
 "display.builtin" = "MacBook 内建屏";
 "display.external.indexed" = "外接显示器 %d";
 "attention.variant.subtle.name" = "默认";
@@ -70,3 +77,5 @@
 "session.status.needsApproval" = "需要确认！";
 "session.status.ended" = "已结束";
 "session.status.archived" = "已归档";
+"session.action.markRead" = "已读";
+"session.action.archive" = "归档";

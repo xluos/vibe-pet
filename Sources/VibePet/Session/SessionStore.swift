@@ -57,6 +57,10 @@ final class SessionStore {
     }
 
     var primaryAttentionSession: Session? {
+        attentionSessions.first
+    }
+
+    var attentionSessions: [Session] {
         sessions.values
             .filter { !isInternalCodexTitleSession($0) }
             .filter { $0.status == .needsApproval || $0.status == .waitingForInput }
@@ -68,7 +72,6 @@ final class SessionStore {
                 }
                 return $0.lastEventAt > $1.lastEventAt
             }
-            .first
     }
 
     var hasActiveSession: Bool {
@@ -151,8 +154,19 @@ final class SessionStore {
     }
 
     func archiveSession(_ session: Session) {
+        let previousStatus = session.status
         session.status = .archived
         save()
+        NotificationCenter.default.post(
+            name: .sessionStatusChanged,
+            object: nil,
+            userInfo: [
+                "sessionId": session.id,
+                "oldStatus": previousStatus.rawValue,
+                "newStatus": session.status.rawValue,
+                "hookEvent": "ArchiveSession",
+            ]
+        )
     }
 
     func removeSession(_ session: Session) {

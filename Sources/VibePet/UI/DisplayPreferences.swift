@@ -9,6 +9,11 @@ enum DisplayPreferences {
         return resolvedScreen(for: lockedDisplayID)
     }
 
+    static func screenContainingMouse() -> NSScreen? {
+        let mouseLocation = NSEvent.mouseLocation
+        return NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) })
+    }
+
     static func resolvedScreen(for lockedDisplayID: String?) -> NSScreen {
         let screens = NSScreen.screens
         guard !screens.isEmpty else { fatalError("No screens available") }
