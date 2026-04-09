@@ -7,6 +7,7 @@ class NotchWindowController: NSWindowController {
     private var transientPresentationScreen: NSScreen?
     private var hostingView: NSHostingView<NotchRootView>?
     private var viewModel: NotchViewModel?
+    private var hoverCollapseWorkItem: DispatchWorkItem?
     private var haloPanel: NSPanel?
     private var haloHostingView: NSHostingView<AttentionHaloRootView>?
     private var mouseCompanionPanel: NSPanel?
@@ -35,6 +36,7 @@ class NotchWindowController: NSWindowController {
     private let settingsContentHeight: CGFloat = 320
     private let sessionListBaseHeight: CGFloat = 56
     private let estimatedRowHeight: CGFloat = 68
+    private let collapseDelay: TimeInterval = 0.25
     private let haloSideInset: CGFloat = 180
     private let haloTopInset: CGFloat = 20
     private let haloBottomInset: CGFloat = 72
@@ -124,6 +126,7 @@ class NotchWindowController: NSWindowController {
         NotificationCenter.default.removeObserver(self)
         mouseTrackingTimer?.invalidate()
         proactiveAttentionCollapseTimer?.invalidate()
+        hoverCollapseWorkItem?.cancel()
         pendingPanelRefreshWorkItem?.cancel()
     }
 
@@ -148,10 +151,6 @@ class NotchWindowController: NSWindowController {
             onQuit: { NSApplication.shared.terminate(nil) }
         )
         self.viewModel = vm
-        vm.onExpandedLayoutChange = { [weak self] in
-            guard let self, self.isExpanded else { return }
-            self.updatePanelSize()
-        }
 
         let hosting = NSHostingView(rootView: NotchRootView(viewModel: vm))
         hosting.frame = panel.contentView!.bounds
@@ -180,6 +179,7 @@ class NotchWindowController: NSWindowController {
             refreshMetrics(for: focusScreen)
         }
         expandedPresentation = presentation
+        cancelPendingCollapse()
         proactiveAttentionCollapseTimer?.invalidate()
 
         // Close settings when collapsing
@@ -205,6 +205,7 @@ class NotchWindowController: NSWindowController {
         guard let panel = window as? NSPanel, let viewModel else { return }
         let wasTransientAttention = expandedPresentation == .transientAttention
         proactiveAttentionCollapseTimer?.invalidate()
+        cancelPendingCollapse()
         expandedPresentation = .collapsed
         viewModel.attentionPresentation = .hidden
         viewModel.attentionSessionIDs = []
@@ -236,6 +237,7 @@ class NotchWindowController: NSWindowController {
 
     override func mouseEntered(with event: NSEvent) {
         isMouseInsidePanel = true
+        cancelPendingCollapse()
         if expandedPresentation == .transientAttention {
             proactiveAttentionCollapseTimer?.invalidate()
             return
@@ -252,7 +254,7 @@ class NotchWindowController: NSWindowController {
             return
         }
         if expandedPresentation == .manual {
-            collapseExpanded()
+            scheduleCollapseIfNeeded()
         }
     }
 
@@ -338,11 +340,13 @@ class NotchWindowController: NSWindowController {
     private func desiredContentHeight() -> CGFloat {
         guard let viewModel else { return emptyStateHeight }
 
-        let rawHeight: CGFloat
         if viewModel.showSettings {
-            rawHeight = settingsContentHeight
-        } else if viewModel.expandedHeaderHeight > 0.5 && viewModel.expandedBodyHeight > 0.5 {
-            rawHeight = viewModel.expandedHeaderHeight + 0.5 + viewModel.expandedBodyHeight
+            return min(settingsContentHeight, maxExpandedContentHeight)
+        }
+
+        let rawHeight: CGFloat
+        if let offscreenMeasuredHeight = measureExpandedContentHeightOffscreen() {
+            rawHeight = offscreenMeasuredHeight
         } else if expandedPresentation == .transientAttention {
             let count = max(visibleAttentionSessions.count, 1)
             let perRow: CGFloat = 152
@@ -359,6 +363,25 @@ class NotchWindowController: NSWindowController {
         return min(rawHeight, maxExpandedContentHeight)
     }
 
+    private func measureExpandedContentHeightOffscreen() -> CGFloat? {
+        guard let viewModel else { return nil }
+        guard !viewModel.showSettings else { return settingsContentHeight }
+
+        let rootView = NotchExpandedMeasureView(
+            petState: currentPetState,
+            attentionAccentColor: attentionGlowColor,
+            sessions: sessionStore.allSessions,
+            attentionSessions: visibleAttentionSessions,
+            showsTransientAttentionPanel: expandedPresentation == .transientAttention && !visibleAttentionSessions.isEmpty
+        )
+        .frame(width: expandedWidth)
+
+        let hostingView = NSHostingView(rootView: rootView)
+        let fittingSize = hostingView.fittingSize
+        let measuredHeight = fittingSize.height
+        return measuredHeight > 0.5 ? measuredHeight : nil
+    }
+
     private func currentPanelFrame() -> NSRect {
         let width = isExpanded ? expandedWidth : collapsedWidth
         let contentHeight = isExpanded ? desiredContentHeight() : 0
@@ -369,6 +392,26 @@ class NotchWindowController: NSWindowController {
     private func applyFrame() {
         guard let panel = window as? NSPanel else { return }
         panel.setFrame(currentPanelFrame(), display: true)
+    }
+
+    private func cancelPendingCollapse() {
+        hoverCollapseWorkItem?.cancel()
+        hoverCollapseWorkItem = nil
+    }
+
+    private func scheduleCollapseIfNeeded() {
+        guard expandedPresentation == .manual else { return }
+
+        cancelPendingCollapse()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.expandedPresentation == .manual else { return }
+            guard !self.isMouseInsidePanel else { return }
+            self.collapseExpanded()
+        }
+
+        hoverCollapseWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + collapseDelay, execute: workItem)
     }
 
     private func schedulePanelRefresh() {
@@ -694,6 +737,18 @@ class NotchWindowController: NSWindowController {
             return Color(red: 1.0, green: 0.22, blue: 0.18)
         }
         return Color(red: 1.0, green: 0.74, blue: 0.08)
+    }
+
+    private var currentPetState: PetState {
+        if sessionStore.sessions.values.contains(where: { $0.status == .needsApproval }) {
+            return .needsAttention
+        } else if sessionStore.hasActiveSession {
+            return .active
+        } else if sessionStore.activeSessions.isEmpty {
+            return .sleeping
+        } else {
+            return .idle
+        }
     }
 
     private var mouseCompanionMessage: String {
@@ -1062,25 +1117,10 @@ class NotchViewModel {
     let onAttentionRead: (Session) -> Void
     let onAttentionArchive: (Session) -> Void
     let onQuit: () -> Void
-    var onExpandedLayoutChange: (() -> Void)?
     var isExpanded: Bool = false
     var showSettings: Bool = false
     var attentionPresentation: AttentionPanelPresentation = .hidden
     var attentionSessionIDs: [String] = []
-    var expandedHeaderHeight: CGFloat = 0 {
-        didSet {
-            if abs(expandedHeaderHeight - oldValue) > 0.5 {
-                onExpandedLayoutChange?()
-            }
-        }
-    }
-    var expandedBodyHeight: CGFloat = 0 {
-        didSet {
-            if abs(expandedBodyHeight - oldValue) > 0.5 {
-                onExpandedLayoutChange?()
-            }
-        }
-    }
 
     init(
         sessionStore: SessionStore,

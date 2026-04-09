@@ -158,20 +158,12 @@ private struct AttentionEffectMetrics {
     }
 }
 
-private struct ExpandedHeaderHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-private struct ExpandedBodyHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
+enum ExpandedContentLayout {
+    static let dividerHeight: CGFloat = 0.5
+    static let standardListTopPadding: CGFloat = 6
+    static let standardListBottomPadding: CGFloat = 14
+    static let attentionListTopPadding: CGFloat = 8
+    static let attentionListBottomPadding: CGFloat = 16
 }
 
 // MARK: - Notch extension shape
@@ -249,12 +241,6 @@ struct NotchContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: L10n.languageDidChangeNotification)) { _ in
             languageRefreshID = UUID()
         }
-        .onPreferenceChange(ExpandedHeaderHeightPreferenceKey.self) { value in
-            viewModel.expandedHeaderHeight = value
-        }
-        .onPreferenceChange(ExpandedBodyHeightPreferenceKey.self) { value in
-            viewModel.expandedBodyHeight = value
-        }
         .overlay {
             if !isExpanded && sessionStore.hasSessionNeedingAttention {
                 AttentionBodyBorderView(
@@ -303,7 +289,7 @@ struct NotchContentView: View {
 
             Rectangle()
                 .fill(Color.white.opacity(0.06))
-                .frame(height: 0.5)
+                .frame(height: ExpandedContentLayout.dividerHeight)
 
             if showsTransientAttentionPanel {
                 attentionSessionList
@@ -358,11 +344,6 @@ struct NotchContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(key: ExpandedHeaderHeightPreferenceKey.self, value: proxy.size.height)
-            }
-        )
     }
 
     private var sessionList: some View {
@@ -372,11 +353,6 @@ struct NotchContentView: View {
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(Color.white.opacity(0.35))
                     .padding(.vertical, 16)
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear.preference(key: ExpandedBodyHeightPreferenceKey.self, value: proxy.size.height)
-                        }
-                    )
             } else {
                 ScrollView {
                     VStack(spacing: 2) {
@@ -387,13 +363,10 @@ struct NotchContentView: View {
                             .onTapGesture { viewModel.onSessionClick(session) }
                         }
                     }
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear.preference(key: ExpandedBodyHeightPreferenceKey.self, value: proxy.size.height)
-                        }
-                    )
+                    .padding(.top, ExpandedContentLayout.standardListTopPadding)
+                    .padding(.bottom, ExpandedContentLayout.standardListBottomPadding)
                 }
             }
         }
@@ -412,13 +385,10 @@ struct NotchContentView: View {
                     .onTapGesture { viewModel.onSessionClick(session) }
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 8)
-            .padding(.vertical, 8)
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(key: ExpandedBodyHeightPreferenceKey.self, value: proxy.size.height)
-                }
-            )
+            .padding(.top, ExpandedContentLayout.attentionListTopPadding)
+            .padding(.bottom, ExpandedContentLayout.attentionListBottomPadding)
         }
     }
 
@@ -458,6 +428,95 @@ struct NotchContentView: View {
         } else {
             return .idle
         }
+    }
+}
+
+struct NotchExpandedMeasureView: View {
+    let petState: PetState
+    let attentionAccentColor: Color
+    let sessions: [Session]
+    let attentionSessions: [Session]
+    let showsTransientAttentionPanel: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                PetView(state: petState)
+                    .frame(width: 24, height: 24)
+
+                Text(L10n.tr("app.name"))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+
+                if showsTransientAttentionPanel {
+                    Text(L10n.tr("notch.attentionPanelTitle", attentionSessions.count))
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundColor(attentionAccentColor.opacity(0.95))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(attentionAccentColor.opacity(0.14))
+                        .clipShape(Capsule())
+                }
+
+                Spacer()
+
+                CircleButton(symbol: "gearshape", foreground: .white.opacity(0.6))
+                CircleButton(symbol: "power", foreground: .red.opacity(0.8))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            Rectangle()
+                .fill(Color.white.opacity(0.06))
+                .frame(height: ExpandedContentLayout.dividerHeight)
+
+            if showsTransientAttentionPanel {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(attentionSessions) { session in
+                        SessionRowView(
+                            session: session,
+                            variant: .attention,
+                            onMarkRead: {},
+                            onArchive: {}
+                        )
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 8)
+                .padding(.top, ExpandedContentLayout.attentionListTopPadding)
+                .padding(.bottom, ExpandedContentLayout.attentionListBottomPadding)
+            } else if sessions.isEmpty {
+                Text(L10n.tr("notch.noActiveSessions"))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(Color.white.opacity(0.35))
+                    .padding(.vertical, 16)
+            } else {
+                VStack(spacing: 2) {
+                    ForEach(sessions) { session in
+                        SessionRowView(session: session, onArchive: {})
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 8)
+                .padding(.top, ExpandedContentLayout.standardListTopPadding)
+                .padding(.bottom, ExpandedContentLayout.standardListBottomPadding)
+            }
+        }
+        .background(.black)
+    }
+}
+
+private struct CircleButton: View {
+    let symbol: String
+    let foreground: Color
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: symbol == "power" ? 10 : 11, weight: .medium))
+            .foregroundColor(foreground)
+            .frame(width: 24, height: 24)
+            .background(Color.white.opacity(0.08))
+            .clipShape(Circle())
     }
 }
 
