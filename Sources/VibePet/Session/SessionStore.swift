@@ -3,6 +3,7 @@ import Foundation
 @Observable
 final class SessionStore {
     var sessions: [String: Session] = [:]
+    private var pendingCodexAppSessions: [String: Session] = [:]
     private let endedSessionRetentionDays = 7
     private let codexTitlePromptMarkers = [
         "you are a helpful assistant. you will be presented with a user prompt",
@@ -85,7 +86,7 @@ final class SessionStore {
     func handleEvent(_ message: BridgeMessage) {
         let source = SessionSource(rawValue: message.source) ?? .unknown
         let isNewSession = sessions[message.sessionId] == nil
-        let session = sessions[message.sessionId] ?? Session(
+        let session = sessions[message.sessionId] ?? pendingCodexAppSessions[message.sessionId] ?? Session(
             id: message.sessionId,
             source: source,
             cwd: message.cwd,
@@ -111,10 +112,22 @@ final class SessionStore {
         // Codex creates an internal "title generation" task before the real task starts.
         // It has its own session id and should not be rendered as a user-facing session.
         if isInternalCodexTitleSession(session) {
+            pendingCodexAppSessions.removeValue(forKey: message.sessionId)
             sessions.removeValue(forKey: message.sessionId)
             save()
             return
         }
+
+        if shouldDiscardPendingCodexAppSession(session, for: message) {
+            pendingCodexAppSessions.removeValue(forKey: message.sessionId)
+            return
+        }
+
+        if shouldDelayCodexAppSession(session, for: message) {
+            pendingCodexAppSessions[message.sessionId] = session
+            return
+        }
+        pendingCodexAppSessions.removeValue(forKey: message.sessionId)
 
         let previousStatus = session.status
         switch message.hookEvent {
@@ -228,6 +241,24 @@ final class SessionStore {
         sessions = sessions.filter { _, session in
             !isInternalCodexTitleSession(session)
         }
+    }
+
+    private func shouldDelayCodexAppSession(_ session: Session, for message: BridgeMessage) -> Bool {
+        guard session.source == .codex else { return false }
+        guard session.terminalBundleId == "com.openai.codex" else { return false }
+
+        let hasVisiblePrompt = !(session.lastPrompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        let hasVisibleAssistantMessage = !(session.lastAssistantMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        return !hasVisiblePrompt && !hasVisibleAssistantMessage
+    }
+
+    private func shouldDiscardPendingCodexAppSession(_ session: Session, for message: BridgeMessage) -> Bool {
+        guard pendingCodexAppSessions[session.id] != nil else { return false }
+        guard message.hookEvent == "SessionEnd" else { return false }
+
+        let hasVisiblePrompt = !(session.lastPrompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        let hasVisibleAssistantMessage = !(session.lastAssistantMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        return !hasVisiblePrompt && !hasVisibleAssistantMessage
     }
 
     private func isInternalCodexTitleSession(_ session: Session) -> Bool {

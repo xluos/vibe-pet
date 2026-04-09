@@ -10,6 +10,7 @@ struct BridgeMessage: Codable {
     let toolName: String?
     let prompt: String?
     let lastAssistantMessage: String?
+    let transcriptPath: String?
     let timestamp: Double
 
     var date: Date {
