@@ -64,29 +64,21 @@ struct SessionRowView: View {
                 .lineLimit(1)
 
             if let prompt = session.lastPrompt, !prompt.isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "person.fill")
-                        .font(.system(size: variant.metaIconSize))
-                        .foregroundColor(.cyan.opacity(0.6))
-                    Text(prompt)
-                        .font(.system(size: variant.bodyFontSize))
-                        .foregroundColor(.white.opacity(0.7))
-                        .lineLimit(variant.bodyLineLimit)
-                        .truncationMode(.tail)
-                }
+                messagePreviewRow(
+                    systemImage: "person.fill",
+                    iconColor: .cyan.opacity(0.6),
+                    textColor: .white.opacity(0.7),
+                    content: prompt
+                )
             }
 
             if let response = session.lastAssistantMessage, !response.isEmpty {
-                HStack(alignment: .top, spacing: 4) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: variant.metaIconSize))
-                        .foregroundColor(.orange.opacity(0.6))
-                    Text(response)
-                        .font(.system(size: variant.bodyFontSize))
-                        .foregroundColor(.white.opacity(0.5))
-                        .lineLimit(variant.bodyLineLimit)
-                        .truncationMode(.tail)
-                }
+                messagePreviewRow(
+                    systemImage: "sparkles",
+                    iconColor: .orange.opacity(0.6),
+                    textColor: .white.opacity(0.5),
+                    content: response
+                )
             }
 
             if variant == .attention {
@@ -205,6 +197,29 @@ struct SessionRowView: View {
         if interval < 60 { return "\(Int(interval))s" }
         if interval < 3600 { return "\(Int(interval / 60))m" }
         return "\(Int(interval / 3600))h"
+    }
+
+    @ViewBuilder
+    private func messagePreviewRow(
+        systemImage: String,
+        iconColor: Color,
+        textColor: Color,
+        content: String
+    ) -> some View {
+        HStack(alignment: .top, spacing: 4) {
+            Image(systemName: systemImage)
+                .font(.system(size: variant.metaIconSize))
+                .foregroundColor(iconColor)
+                .frame(width: variant.metaIconSize + 4, alignment: .topLeading)
+                .padding(.top, 1)
+
+            Text(content)
+                .font(.system(size: variant.bodyFontSize))
+                .foregroundColor(textColor)
+                .lineLimit(variant.bodyLineLimit)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
