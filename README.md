@@ -22,7 +22,7 @@ macOS 刘海区域的 AI 编程会话监控工具。当你同时开多个 Claude
 | 工具 | 配置文件 | 标识 |
 |------|---------|------|
 | Claude Code | `~/.claude/settings.json` | CC (橙色) |
-| Codex CLI | `~/.codex/hooks.json` | CX (绿色) |
+| Codex CLI | `~/.codex/hooks.json` & `~/.codex/config.toml` | CX (绿色) |
 | Coco (Trae CLI) | `~/.trae/traecli.yaml` | CO (蓝色) |
 
 仅在对应工具的配置目录存在时才写入 hooks。
@@ -30,6 +30,7 @@ macOS 刘海区域的 AI 编程会话监控工具。当你同时开多个 Claude
 ## 环境要求
 
 - macOS 14.0 (Sonoma) 或更高版本
+- Codex CLI需要0.118.0+版本(codex -V查看)，并在`~/.codex/config.toml`开启hook功能
 
 ## 安装
 

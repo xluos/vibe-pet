@@ -138,7 +138,7 @@ struct SettingsWindowView: View {
                     settingsInfoRow(L10n.tr("settings.sessionsFile"), icon: "doc", iconColor: .gray, value: "~/.vibe-pet/sessions.json")
                     Divider().padding(.leading, 40)
                     settingsButtonRow(L10n.tr("settings.reinstallHooks"), icon: "arrow.triangle.2.circlepath", iconColor: .blue) {
-                        HookInstaller().installAll()
+                        reinstallHooks()
                     }
                     Divider().padding(.leading, 40)
                     settingsButtonRow(L10n.tr("settings.uninstallHooks"), icon: "xmark.circle", iconColor: .red) {
@@ -417,18 +417,73 @@ struct SettingsWindowView: View {
 
     private func hookStatus(for source: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let path: String
+
         switch source {
-        case "claude": path = "\(home)/.claude/settings.json"
-        case "codex": path = "\(home)/.codex/hooks.json"
-        case "coco": path = "\(home)/.trae/traecli.yaml"
-        default: return L10n.tr("settings.unknown")
+        case "claude":
+            let path = "\(home)/.claude/settings.json"
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                  let str = String(data: data, encoding: .utf8) else {
+                return L10n.tr("settings.notConfigured")
+            }
+            return str.contains("vibe-pet-bridge") ? L10n.tr("settings.active") : L10n.tr("settings.notConfigured")
+
+        case "codex":
+            let configPath = "\(home)/.codex/config.toml"
+            let installer = HookInstaller()
+            return installer.isCodexHooksEnabled(at: URL(fileURLWithPath: configPath)) ? L10n.tr("settings.active") : L10n.tr("settings.notConfigured")
+
+        case "coco":
+            let path = "\(home)/.trae/traecli.yaml"
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                  let str = String(data: data, encoding: .utf8) else {
+                return L10n.tr("settings.notConfigured")
+            }
+            return str.contains("vibe-pet-bridge") ? L10n.tr("settings.active") : L10n.tr("settings.notConfigured")
+
+        default:
+            return L10n.tr("settings.unknown")
         }
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-              let str = String(data: data, encoding: .utf8) else {
-            return L10n.tr("settings.notConfigured")
+    }
+
+    private func reinstallHooks() {
+        let installer = HookInstaller()
+
+        // Check if Codex needs confirmation
+        if installer.needsCodexHooksConfirmation() {
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = L10n.tr("codexHooks.enableDialog.title")
+                alert.informativeText = L10n.tr("codexHooks.settingsEnableDialog.message")
+                alert.alertStyle = .informational
+                alert.addButton(withTitle: L10n.tr("codexHooks.enableDialog.confirm"))
+                alert.addButton(withTitle: L10n.tr("codexHooks.settingsEnableDialog.skip"))
+
+                let response = alert.runModal()
+
+                if response == .alertFirstButtonReturn {
+                    // User chose to enable hooks
+                    do {
+                        try installer.enableCodexHooks()
+                        print("[VibePet] Codex hooks enabled during reinstall")
+                    } catch {
+                        print("[VibePet] Failed to enable Codex hooks: \(error)")
+                        let errorAlert = NSAlert()
+                        errorAlert.messageText = L10n.tr("codexHooks.enableError.title")
+                        errorAlert.informativeText = error.localizedDescription
+                        errorAlert.alertStyle = .warning
+                        errorAlert.addButton(withTitle: L10n.tr("common.ok"))
+                        errorAlert.runModal()
+                        return
+                    }
+                }
+
+                // Install all hooks
+                installer.installAll()
+            }
+        } else {
+            // Install all hooks directly
+            installer.installAll()
         }
-        return str.contains("vibe-pet-bridge") ? L10n.tr("settings.active") : L10n.tr("settings.notConfigured")
     }
 
     private func reloadDisplays() {

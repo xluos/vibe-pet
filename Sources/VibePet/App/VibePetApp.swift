@@ -18,11 +18,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var soundObserver: Any?
     private var localeObserver: Any?
     private let attentionReminderCoordinator = AttentionReminderCoordinator()
+    private var screenObserver: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Install launcher script and hooks
         installLauncher()
         HookInstaller().installIfNeeded()
+
+        // Check Codex hooks status on first launch
+        checkCodexHooksOnFirstLaunch()
 
         // Start IPC socket server
         socketServer = SocketServer { [weak self] message in
@@ -44,6 +48,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let hookEvent = notification.userInfo?["hookEvent"] as? String else { return }
             switch hookEvent {
             case "SessionStart":
+                SoundManager.shared.play(.sessionStart)
+            case "UserPromptSubmit":
                 SoundManager.shared.play(.sessionStart)
             case "Stop":
                 SoundManager.shared.play(.taskComplete)
@@ -70,6 +76,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         notchPanel = NotchWindowController(sessionStore: sessionStore)
         notchPanel?.showWindow(nil)
         attentionReminderCoordinator.start(sessionStore: sessionStore)
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.notchPanel?.refreshScreenConfiguration()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -79,6 +92,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = localeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = screenObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -147,5 +163,81 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         try? script.write(to: launcherPath, atomically: true, encoding: .utf8)
         chmod(launcherPath.path, 0o755)
         print("[VibePet] Launcher installed at \(launcherPath.path)")
+    }
+
+    private func checkCodexHooksOnFirstLaunch() {
+        // Only check once per installation
+        let checkedKey = "vibepet.codexHooksChecked"
+        guard UserDefaults.standard.object(forKey: checkedKey) == nil else {
+            return
+        }
+
+        // Mark as checked
+        UserDefaults.standard.set(true, forKey: checkedKey)
+
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let codexDir = home.appendingPathComponent(".codex")
+
+        // Check if ~/.codex exists
+        guard FileManager.default.fileExists(atPath: codexDir.path) else {
+            print("[VibePet] ~/.codex not found, skipping Codex hooks check")
+            return
+        }
+
+        let configPath = codexDir.appendingPathComponent("config.toml")
+        guard FileManager.default.fileExists(atPath: configPath.path) else {
+            print("[VibePet] ~/.codex/config.toml not found, skipping Codex hooks check")
+            return
+        }
+
+        // Check if hooks are explicitly disabled
+        let installer = HookInstaller()
+        let hooksEnabled = installer.isCodexHooksEnabled(at: configPath)
+
+        if !hooksEnabled {
+            // Only show dialog if hooks are explicitly disabled (codex_hooks = false)
+            DispatchQueue.main.async {
+                self.showCodexHooksEnableDialog()
+            }
+        }
+    }
+
+    private func showCodexHooksEnableDialog() {
+        let alert = NSAlert()
+        alert.messageText = L10n.tr("codexHooks.enableDialog.title")
+        alert.informativeText = L10n.tr("codexHooks.enableDialog.message")
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: L10n.tr("codexHooks.enableDialog.confirm"))
+        alert.addButton(withTitle: L10n.tr("codexHooks.enableDialog.cancel"))
+
+        let response = alert.runModal()
+
+        if response == .alertFirstButtonReturn {
+            // User chose to enable hooks
+            do {
+                try HookInstaller().enableCodexHooks()
+                print("[VibePet] Codex hooks enabled by user")
+
+                // Show success message
+                let successAlert = NSAlert()
+                successAlert.messageText = L10n.tr("codexHooks.enableSuccess.title")
+                successAlert.informativeText = L10n.tr("codexHooks.enableSuccess.message")
+                successAlert.alertStyle = .informational
+                successAlert.addButton(withTitle: L10n.tr("common.ok"))
+                successAlert.runModal()
+            } catch {
+                print("[VibePet] Failed to enable Codex hooks: \(error)")
+
+                // Show error message
+                let errorAlert = NSAlert()
+                errorAlert.messageText = L10n.tr("codexHooks.enableError.title")
+                errorAlert.informativeText = L10n.tr("codexHooks.enableError.message", error.localizedDescription)
+                errorAlert.alertStyle = .warning
+                errorAlert.addButton(withTitle: L10n.tr("common.ok"))
+                errorAlert.runModal()
+            }
+        } else {
+            print("[VibePet] User declined to enable Codex hooks")
+        }
     }
 }

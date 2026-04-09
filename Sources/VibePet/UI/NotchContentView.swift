@@ -158,6 +158,22 @@ private struct AttentionEffectMetrics {
     }
 }
 
+private struct ExpandedHeaderHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct ExpandedBodyHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 // MARK: - Notch extension shape
 
 struct NotchExtensionShape: Shape {
@@ -233,6 +249,12 @@ struct NotchContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: L10n.languageDidChangeNotification)) { _ in
             languageRefreshID = UUID()
         }
+        .onPreferenceChange(ExpandedHeaderHeightPreferenceKey.self) { value in
+            viewModel.expandedHeaderHeight = value
+        }
+        .onPreferenceChange(ExpandedBodyHeightPreferenceKey.self) { value in
+            viewModel.expandedBodyHeight = value
+        }
         .overlay {
             if !isExpanded && sessionStore.hasSessionNeedingAttention {
                 AttentionBodyBorderView(
@@ -269,8 +291,8 @@ struct NotchContentView: View {
                     .frame(width: 4, height: 4)
             }
         }
-        .padding(.horizontal, 8)
-        .frame(height: 33)
+        .padding(.horizontal, 10)
+        .frame(height: viewModel.notchHeight)
     }
 
     // MARK: - Expanded content
@@ -336,6 +358,11 @@ struct NotchContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: ExpandedHeaderHeightPreferenceKey.self, value: proxy.size.height)
+            }
+        )
     }
 
     private var sessionList: some View {
@@ -345,6 +372,11 @@ struct NotchContentView: View {
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(Color.white.opacity(0.35))
                     .padding(.vertical, 16)
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: ExpandedBodyHeightPreferenceKey.self, value: proxy.size.height)
+                        }
+                    )
             } else {
                 ScrollView {
                     VStack(spacing: 2) {
@@ -357,6 +389,11 @@ struct NotchContentView: View {
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: ExpandedBodyHeightPreferenceKey.self, value: proxy.size.height)
+                        }
+                    )
                 }
             }
         }
@@ -377,6 +414,11 @@ struct NotchContentView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 8)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: ExpandedBodyHeightPreferenceKey.self, value: proxy.size.height)
+                }
+            )
         }
     }
 

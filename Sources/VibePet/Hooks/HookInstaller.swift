@@ -1,4 +1,5 @@
 import Foundation
+import TOMLKit
 
 final class HookInstaller {
     private var bridgeCommand: String {
@@ -55,6 +56,23 @@ final class HookInstaller {
         }
     }
 
+    /// Check if Codex hooks need user confirmation (directory exists but hooks disabled)
+    func needsCodexHooksConfirmation() -> Bool {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let codexDir = home.appendingPathComponent(".codex")
+
+        guard FileManager.default.fileExists(atPath: codexDir.path) else {
+            return false
+        }
+
+        let configPath = codexDir.appendingPathComponent("config.toml")
+        guard FileManager.default.fileExists(atPath: configPath.path) else {
+            return false
+        }
+
+        return !isCodexHooksEnabled(at: configPath)
+    }
+
     // MARK: - Claude Code (~/.claude/settings.json)
 
     private func installClaudeHooks() throws {
@@ -92,7 +110,7 @@ final class HookInstaller {
         try writeJSON(config, to: settingsPath)
     }
 
-    // MARK: - Codex (~/.codex/hooks.json)
+    // MARK: - Codex (~/.codex/hooks.json + config.toml)
 
     private func installCodexHooks() throws {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -101,6 +119,18 @@ final class HookInstaller {
             print("[VibePet] ~/.codex not found, skipping Codex hooks")
             return
         }
+
+        // Check if hooks are explicitly disabled in config.toml
+        let configPath = dir.appendingPathComponent("config.toml")
+        if FileManager.default.fileExists(atPath: configPath.path) {
+            if !isCodexHooksEnabled(at: configPath) {
+                print("[VibePet] Codex hooks explicitly disabled in config.toml, skipping")
+                // Store pending state for UI to prompt user
+                UserDefaults.standard.set(true, forKey: "vibepet.codexHooksPending")
+                return
+            }
+        }
+
         let hooksPath = dir.appendingPathComponent("hooks.json")
 
         var config = readJSON(at: hooksPath) ?? [:]
@@ -121,6 +151,64 @@ final class HookInstaller {
 
         config["hooks"] = hooks
         try writeJSON(config, to: hooksPath)
+
+        // Clear pending state
+        UserDefaults.standard.removeObject(forKey: "vibepet.codexHooksPending")
+    }
+
+    /// Enable Codex hooks by modifying both config.toml and hooks.json
+    func enableCodexHooks() throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let dir = home.appendingPathComponent(".codex")
+        let configPath = dir.appendingPathComponent("config.toml")
+
+        guard FileManager.default.fileExists(atPath: configPath.path) else {
+            throw NSError(domain: "VibePet", code: 1, userInfo: [NSLocalizedDescriptionKey: "config.toml not found"])
+        }
+
+        // Enable hooks in config.toml
+        try enableCodexHooksInConfig(at: configPath)
+
+        // Install hooks to hooks.json
+        try installCodexHooks()
+    }
+
+    /// Check if hooks are enabled in Codex config.toml
+    /// Returns true only if [features] codex_hooks = true is explicitly set
+    func isCodexHooksEnabled(at url: URL) -> Bool {
+        guard let content = try? String(contentsOf: url, encoding: .utf8),
+              let table = try? TOMLTable(string: content) else {
+            return false
+        }
+
+        // Check [features] section for codex_hooks
+        if let featuresTable = table["features"]?.table,
+           let enabled = featuresTable["codex_hooks"]?.bool {
+            return enabled
+        }
+
+        // No config or no codex_hooks → disabled by default
+        return false
+    }
+
+    /// Enable hooks in Codex config.toml
+    private func enableCodexHooksInConfig(at url: URL) throws {
+        backup(file: url)
+
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            throw NSError(domain: "VibePet", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to read config.toml"])
+        }
+
+        let table = (try? TOMLTable(string: content)) ?? TOMLTable()
+
+        // Get or create [features] section
+        let featuresTable = table["features"]?.table ?? TOMLTable()
+        featuresTable["codex_hooks"] = true
+        table["features"] = featuresTable
+
+        // Write back
+        let newContent = table.convert(to: .toml)
+        try newContent.write(to: url, atomically: true, encoding: .utf8)
     }
 
     // MARK: - Helpers

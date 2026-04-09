@@ -84,6 +84,7 @@ final class SessionStore {
 
     func handleEvent(_ message: BridgeMessage) {
         let source = SessionSource(rawValue: message.source) ?? .unknown
+        let isNewSession = sessions[message.sessionId] == nil
         let session = sessions[message.sessionId] ?? Session(
             id: message.sessionId,
             source: source,
@@ -139,7 +140,7 @@ final class SessionStore {
         refreshTitleIfNeeded(for: session)
         save()
 
-        if session.status != previousStatus {
+        if session.status != previousStatus || isNewSession {
             NotificationCenter.default.post(
                 name: .sessionStatusChanged,
                 object: nil,

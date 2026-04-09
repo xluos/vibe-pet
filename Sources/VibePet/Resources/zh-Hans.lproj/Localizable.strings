@@ -43,6 +43,7 @@
 "settings.unknown" = "未知";
 "settings.notConfigured" = "未配置";
 "settings.active" = "已启用";
+"common.ok" = "好的";
 "settings.builtinDisplayDefault" = "内建显示器（默认）";
 "unit.px" = "%d px";
 "unit.pxPerSecond" = "%d px/s";
@@ -79,3 +80,13 @@
 "session.status.archived" = "已归档";
 "session.action.markRead" = "已读";
 "session.action.archive" = "归档";
+"codexHooks.enableDialog.title" = "启用 Codex Hooks？";
+"codexHooks.enableDialog.message" = "VibePet 检测到 Codex CLI 已安装，但 config.toml 中的 hooks 未启用。是否启用 hooks 以追踪您的 Codex 会话？";
+"codexHooks.enableDialog.confirm" = "启用 Hooks";
+"codexHooks.enableDialog.cancel" = "暂不启用";
+"codexHooks.settingsEnableDialog.message" = "检测到 Codex CLI 已安装，但 config.toml 中的 hooks 未启用。是否启用 hooks？";
+"codexHooks.settingsEnableDialog.skip" = "跳过";
+"codexHooks.enableSuccess.title" = "Codex Hooks 已启用";
+"codexHooks.enableSuccess.message" = "Codex hooks 已成功启用。VibePet 现在将追踪您的 Codex 会话。";
+"codexHooks.enableError.title" = "启用 Hooks 失败";
+"codexHooks.enableError.message" = "无法启用 Codex hooks：%@\n\n您可以稍后在设置中重试。";

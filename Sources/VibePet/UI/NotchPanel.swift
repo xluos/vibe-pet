@@ -31,6 +31,10 @@ class NotchWindowController: NSWindowController {
     private let collapsedRightRevealWidth: CGFloat = 36
     private let expandedOverflowPerSide: CGFloat = 44
     private let preferredExpandedExtraWidth: CGFloat = 80
+    private let emptyStateHeight: CGFloat = 80
+    private let settingsContentHeight: CGFloat = 320
+    private let sessionListBaseHeight: CGFloat = 56
+    private let estimatedRowHeight: CGFloat = 68
     private let haloSideInset: CGFloat = 180
     private let haloTopInset: CGFloat = 20
     private let haloBottomInset: CGFloat = 72
@@ -51,13 +55,13 @@ class NotchWindowController: NSWindowController {
         )
         let cw = metrics.collapsedWidth
         let ch = metrics.collapsedHeight
-        let ew = metrics.expandedWidth
 
         let x = screenFrame.midX - cw / 2
         let y = screenFrame.maxY - ch
+        let frame = NSRect(x: x, y: y, width: cw, height: ch)
 
         let panel = NSPanel(
-            contentRect: NSRect(x: x, y: y, width: cw, height: ch),
+            contentRect: frame,
             styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: false
@@ -73,11 +77,12 @@ class NotchWindowController: NSWindowController {
 
         super.init(window: panel)
 
-        self.collapsedWidth = cw
-        self.collapsedHeight = ch
-        self.expandedWidth = ew
+        self.collapsedWidth = metrics.collapsedWidth
+        self.collapsedHeight = metrics.collapsedHeight
+        self.expandedWidth = metrics.expandedWidth
 
         setupContent()
+        refreshScreenConfiguration()
 
         let trackingArea = NSTrackingArea(
             rect: panel.contentView!.bounds,
@@ -122,6 +127,15 @@ class NotchWindowController: NSWindowController {
         pendingPanelRefreshWorkItem?.cancel()
     }
 
+    func refreshScreenConfiguration() {
+        let screen = activeScreen
+        refreshMetrics(for: screen)
+        applyFrame()
+        guard let panel = window as? NSPanel else { return }
+        updateAttentionHalo(relativeTo: panel)
+        updateMouseCompanion()
+    }
+
     private func setupContent() {
         guard let panel = window as? NSPanel else { return }
         let vm = NotchViewModel(
@@ -134,6 +148,10 @@ class NotchWindowController: NSWindowController {
             onQuit: { NSApplication.shared.terminate(nil) }
         )
         self.viewModel = vm
+        vm.onExpandedLayoutChange = { [weak self] in
+            guard let self, self.isExpanded else { return }
+            self.updatePanelSize()
+        }
 
         let hosting = NSHostingView(rootView: NotchRootView(viewModel: vm))
         hosting.frame = panel.contentView!.bounds
@@ -170,11 +188,7 @@ class NotchWindowController: NSWindowController {
         }
 
         syncAttentionPresentation()
-
-        let height = collapsedHeight + expandedContentHeight
-        let w = expandedWidth
-
-        repositionPanel(panel, width: w, height: height)
+        applyFrame()
         updateAttentionHalo(relativeTo: panel)
         updateMouseCompanion()
 
@@ -203,7 +217,7 @@ class NotchWindowController: NSWindowController {
             viewModel.showSettings = false
         }
 
-        repositionPanel(panel, width: collapsedWidth, height: collapsedHeight)
+        applyFrame()
         updateAttentionHalo(relativeTo: panel)
         updateMouseCompanion()
 
@@ -215,11 +229,7 @@ class NotchWindowController: NSWindowController {
     /// Resize panel when switching to/from settings
     func updatePanelSize() {
         guard let panel = window as? NSPanel, isExpanded else { return }
-
-        let height = collapsedHeight + expandedContentHeight
-        let w = expandedWidth
-
-        repositionPanel(panel, width: w, height: height)
+        applyFrame()
         updateAttentionHalo(relativeTo: panel)
         updateMouseCompanion()
     }
@@ -294,11 +304,7 @@ class NotchWindowController: NSWindowController {
     }
 
     private func repositionPanel(_ panel: NSPanel, width: CGFloat, height: CGFloat) {
-        let screen = activeScreen
-        let screenFrame = screen.frame
-        let x = screenFrame.midX - width / 2
-        let y = screenFrame.maxY - height
-        panel.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
+        panel.setFrame(Self.panelFrame(for: activeScreen, width: width, height: height), display: true)
     }
 
     private func refreshMetrics(for screen: NSScreen) {
@@ -316,6 +322,55 @@ class NotchWindowController: NSWindowController {
         viewModel?.notchHeight = nextMetrics.collapsedHeight
     }
 
+    private static func panelFrame(for screen: NSScreen, width: CGFloat, height: CGFloat) -> NSRect {
+        let screenFrame = screen.frame
+        let x = screenFrame.midX - width / 2
+        let y = screenFrame.maxY - height
+        return NSRect(x: x, y: y, width: width, height: height)
+    }
+
+    private var maxExpandedContentHeight: CGFloat {
+        let screen = activeScreen
+        let availableHeight = screen.frame.maxY - screen.visibleFrame.minY
+        return max(emptyStateHeight, availableHeight - collapsedHeight)
+    }
+
+    private func desiredContentHeight() -> CGFloat {
+        guard let viewModel else { return emptyStateHeight }
+
+        let rawHeight: CGFloat
+        if viewModel.showSettings {
+            rawHeight = settingsContentHeight
+        } else if viewModel.expandedHeaderHeight > 0.5 && viewModel.expandedBodyHeight > 0.5 {
+            rawHeight = viewModel.expandedHeaderHeight + 0.5 + viewModel.expandedBodyHeight
+        } else if expandedPresentation == .transientAttention {
+            let count = max(visibleAttentionSessions.count, 1)
+            let perRow: CGFloat = 152
+            let headerHeight: CGFloat = 41
+            let dividerHeight: CGFloat = 1
+            let verticalPadding: CGFloat = 24
+            rawHeight = CGFloat(count) * perRow + headerHeight + dividerHeight + verticalPadding
+        } else if sessionStore.allSessions.isEmpty {
+            rawHeight = emptyStateHeight
+        } else {
+            rawHeight = sessionListBaseHeight + CGFloat(sessionStore.allSessions.count) * estimatedRowHeight
+        }
+
+        return min(rawHeight, maxExpandedContentHeight)
+    }
+
+    private func currentPanelFrame() -> NSRect {
+        let width = isExpanded ? expandedWidth : collapsedWidth
+        let contentHeight = isExpanded ? desiredContentHeight() : 0
+        let height = collapsedHeight + contentHeight
+        return Self.panelFrame(for: activeScreen, width: width, height: height)
+    }
+
+    private func applyFrame() {
+        guard let panel = window as? NSPanel else { return }
+        panel.setFrame(currentPanelFrame(), display: true)
+    }
+
     private func schedulePanelRefresh() {
         pendingPanelRefreshWorkItem?.cancel()
 
@@ -323,9 +378,7 @@ class NotchWindowController: NSWindowController {
             guard let self, let panel = self.window as? NSPanel else { return }
             let screen = self.activeScreen
             self.refreshMetrics(for: screen)
-            let width = self.isExpanded ? self.expandedWidth : self.collapsedWidth
-            let height = self.isExpanded ? (self.collapsedHeight + self.expandedContentHeight) : self.collapsedHeight
-            self.repositionPanel(panel, width: width, height: height)
+            self.applyFrame()
             self.updateAttentionHalo(relativeTo: panel)
             self.updateMouseCompanion()
         }
@@ -706,26 +759,6 @@ class NotchWindowController: NSWindowController {
         }
     }
 
-    private var expandedContentHeight: CGFloat {
-        guard let viewModel else { return 80 }
-        if viewModel.showSettings {
-            return 320
-        }
-
-        if expandedPresentation == .transientAttention {
-            let count = max(visibleAttentionSessions.count, 1)
-            let perRow: CGFloat = 152
-            let headerHeight: CGFloat = 41
-            let dividerHeight: CGFloat = 1
-            let verticalPadding: CGFloat = 24
-            let basePadding = headerHeight + dividerHeight + verticalPadding
-            return CGFloat(count) * perRow + basePadding
-        }
-
-        let count = max(sessionStore.allSessions.count, 1)
-        return min(CGFloat(count) * 52 + 60, 400)
-    }
-
     private func shouldShowProactiveAttentionPopup(oldStatus: SessionStatus?, newStatus: SessionStatus?) -> Bool {
         guard AttentionAnimationPreferences.resolvedProactivePopupEnabled() else { return false }
         guard let newStatus else { return false }
@@ -1029,10 +1062,25 @@ class NotchViewModel {
     let onAttentionRead: (Session) -> Void
     let onAttentionArchive: (Session) -> Void
     let onQuit: () -> Void
+    var onExpandedLayoutChange: (() -> Void)?
     var isExpanded: Bool = false
     var showSettings: Bool = false
     var attentionPresentation: AttentionPanelPresentation = .hidden
     var attentionSessionIDs: [String] = []
+    var expandedHeaderHeight: CGFloat = 0 {
+        didSet {
+            if abs(expandedHeaderHeight - oldValue) > 0.5 {
+                onExpandedLayoutChange?()
+            }
+        }
+    }
+    var expandedBodyHeight: CGFloat = 0 {
+        didSet {
+            if abs(expandedBodyHeight - oldValue) > 0.5 {
+                onExpandedLayoutChange?()
+            }
+        }
+    }
 
     init(
         sessionStore: SessionStore,

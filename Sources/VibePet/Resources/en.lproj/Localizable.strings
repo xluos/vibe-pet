@@ -43,6 +43,7 @@
 "settings.unknown" = "Unknown";
 "settings.notConfigured" = "Not configured";
 "settings.active" = "Active";
+"common.ok" = "OK";
 "settings.builtinDisplayDefault" = "Built-in display (Default)";
 "unit.px" = "%d px";
 "unit.pxPerSecond" = "%d px/s";
@@ -79,3 +80,13 @@
 "session.status.archived" = "archived";
 "session.action.markRead" = "Read";
 "session.action.archive" = "Archive";
+"codexHooks.enableDialog.title" = "Enable Codex Hooks?";
+"codexHooks.enableDialog.message" = "VibePet detected that Codex CLI is installed, but hooks are not enabled in config.toml. Enable hooks to track your Codex sessions?";
+"codexHooks.enableDialog.confirm" = "Enable Hooks";
+"codexHooks.enableDialog.cancel" = "Not Now";
+"codexHooks.settingsEnableDialog.message" = "Codex CLI is installed, but hooks are not enabled in config.toml. Enable hooks now?";
+"codexHooks.settingsEnableDialog.skip" = "Skip";
+"codexHooks.enableSuccess.title" = "Codex Hooks Enabled";
+"codexHooks.enableSuccess.message" = "Codex hooks were enabled successfully. VibePet will now track your Codex sessions.";
+"codexHooks.enableError.title" = "Failed to Enable Hooks";
+"codexHooks.enableError.message" = "Unable to enable Codex hooks: %@\n\nYou can retry later from Settings.";
