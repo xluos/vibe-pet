@@ -59,6 +59,7 @@ func main() {
     var toolName: String?
     var prompt: String?
     var lastAssistantMessage: String?
+    var transcriptPath: String?
 
     if let json = try? JSONSerialization.jsonObject(with: stdinData) as? [String: Any] {
         if let event = json["hookEventName"] as? String ?? json["hook_event_name"] as? String ?? json["event"] as? String {
@@ -76,6 +77,9 @@ func main() {
         }
         if let msg = json["last_assistant_message"] as? String ?? json["lastAssistantMessage"] as? String {
             lastAssistantMessage = String(msg.prefix(300))
+        }
+        if let path = json["transcript_path"] as? String ?? json["transcriptPath"] as? String {
+            transcriptPath = path
         }
     }
 
@@ -105,6 +109,7 @@ func main() {
         "toolName": toolName,
         "prompt": prompt,
         "lastAssistantMessage": lastAssistantMessage,
+        "transcriptPath": transcriptPath,
         "timestamp": Date().timeIntervalSince1970,
     ]
 

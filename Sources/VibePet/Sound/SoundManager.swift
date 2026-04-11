@@ -15,6 +15,7 @@ final class SoundManager {
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private var buffers: [SoundEvent: AVAudioPCMBuffer] = [:]
+    private var strongAttentionBuffers: [AttentionAnimationVariant: AVAudioPCMBuffer] = [:]
     private var isReady = false
     private var outputFormat: AVAudioFormat?
 
@@ -60,6 +61,21 @@ final class SoundManager {
         DispatchQueue.main.async { [self] in
             if !engine.isRunning { startEngine() }
             guard isReady, let buffer = buffers[event] else { return }
+            playerNode.stop()
+            playerNode.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
+            playerNode.play()
+        }
+    }
+
+    func playStrongAttention(for variant: AttentionAnimationVariant) {
+        DispatchQueue.main.async { [self] in
+            guard isReady else { return }
+
+            let resolvedVariant: AttentionAnimationVariant = variant == .subtle
+                ? AttentionAnimationPreferences.defaultStrongStyle
+                : variant
+            guard let buffer = strongAttentionBuffers[resolvedVariant] else { return }
+
             playerNode.stop()
             playerNode.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
             playerNode.play()
@@ -117,13 +133,61 @@ final class SoundManager {
             format: format,
             waveform: .triangle
         )
+
+        strongAttentionBuffers[.urgentPulse] = generateToneSequence(
+            frequencies: [988.0, 0, 988.0, 0, 1318.51],
+            durations: [0.045, 0.04, 0.05, 0.16, 0.1],
+            sampleRate: sampleRate,
+            channels: channels,
+            format: format,
+            waveform: .square,
+            volume: 0.11
+        )
+
+        strongAttentionBuffers[.goldenAlert] = generateToneSequence(
+            frequencies: [1046.50, 1318.51, 1567.98, 0, 1318.51],
+            durations: [0.04, 0.045, 0.08, 0.05, 0.08],
+            sampleRate: sampleRate,
+            channels: channels,
+            format: format,
+            waveform: .triangle,
+            volume: 0.1
+        )
+
+        strongAttentionBuffers[.hyperRipple] = generateToneSequence(
+            frequencies: [739.99, 880.0, 1046.50, 1174.66],
+            durations: [0.04, 0.04, 0.045, 0.05],
+            sampleRate: sampleRate,
+            channels: channels,
+            format: format,
+            waveform: .square,
+            volume: 0.085
+        )
+
+        strongAttentionBuffers[.attentionShake] = generateToneSequence(
+            frequencies: [784.0, 659.25, 784.0, 659.25],
+            durations: [0.05, 0.05, 0.05, 0.07],
+            sampleRate: sampleRate,
+            channels: channels,
+            format: format,
+            waveform: .sawtooth,
+            volume: 0.095
+        )
     }
 
     private enum Waveform {
         case square, triangle, sawtooth
     }
 
-    private func generateToneSequence(frequencies: [Double], durations: [Double], sampleRate: Double, channels: Int, format: AVAudioFormat, waveform: Waveform) -> AVAudioPCMBuffer? {
+    private func generateToneSequence(
+        frequencies: [Double],
+        durations: [Double],
+        sampleRate: Double,
+        channels: Int,
+        format: AVAudioFormat,
+        waveform: Waveform,
+        volume: Float = 0.15
+    ) -> AVAudioPCMBuffer? {
         let totalDuration = durations.reduce(0, +)
         let frameCount = AVAudioFrameCount(totalDuration * sampleRate)
 
@@ -135,7 +199,6 @@ final class SoundManager {
         guard let channelData = buffer.floatChannelData else { return nil }
 
         var sampleIndex: AVAudioFrameCount = 0
-        let volume: Float = 0.15
 
         for (i, freq) in frequencies.enumerated() {
             let duration = durations[i]

@@ -16,6 +16,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var sessionStore = SessionStore()
     private var notchPanel: NotchWindowController?
     private var soundObserver: Any?
+    private var localeObserver: Any?
+    private let attentionReminderCoordinator = AttentionReminderCoordinator()
     private var screenObserver: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -60,9 +62,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        localeObserver = NotificationCenter.default.addObserver(
+            forName: NSLocale.currentLocaleDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            let selectedLanguage = UserDefaults.standard.string(forKey: L10n.languageKey) ?? ""
+            guard selectedLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            NotificationCenter.default.post(name: L10n.languageDidChangeNotification, object: nil)
+        }
+
         // Create notch panel UI
         notchPanel = NotchWindowController(sessionStore: sessionStore)
         notchPanel?.showWindow(nil)
+        attentionReminderCoordinator.start(sessionStore: sessionStore)
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -74,7 +87,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         socketServer?.stop()
+        attentionReminderCoordinator.stop()
         if let observer = soundObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = localeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = screenObserver {
@@ -187,11 +204,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showCodexHooksEnableDialog() {
         let alert = NSAlert()
-        alert.messageText = "启用 Codex Hooks？"
-        alert.informativeText = "VibePet 检测到 Codex CLI 已安装，但 config.toml 中的 hooks 未启用。是否启用 hooks 以追踪您的 Codex 会话？"
+        alert.messageText = L10n.tr("codexHooks.enableDialog.title")
+        alert.informativeText = L10n.tr("codexHooks.enableDialog.message")
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "启用 Hooks")
-        alert.addButton(withTitle: "暂不启用")
+        alert.addButton(withTitle: L10n.tr("codexHooks.enableDialog.confirm"))
+        alert.addButton(withTitle: L10n.tr("codexHooks.enableDialog.cancel"))
 
         let response = alert.runModal()
 
@@ -203,20 +220,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                 // Show success message
                 let successAlert = NSAlert()
-                successAlert.messageText = "Codex Hooks 已启用"
-                successAlert.informativeText = "Codex hooks 已成功启用。VibePet 现在将追踪您的 Codex 会话。"
+                successAlert.messageText = L10n.tr("codexHooks.enableSuccess.title")
+                successAlert.informativeText = L10n.tr("codexHooks.enableSuccess.message")
                 successAlert.alertStyle = .informational
-                successAlert.addButton(withTitle: "好的")
+                successAlert.addButton(withTitle: L10n.tr("common.ok"))
                 successAlert.runModal()
             } catch {
                 print("[VibePet] Failed to enable Codex hooks: \(error)")
 
                 // Show error message
                 let errorAlert = NSAlert()
-                errorAlert.messageText = "启用 Hooks 失败"
-                errorAlert.informativeText = "无法启用 Codex hooks：\(error.localizedDescription)\n\n您可以稍后在设置中重试。"
+                errorAlert.messageText = L10n.tr("codexHooks.enableError.title")
+                errorAlert.informativeText = L10n.tr("codexHooks.enableError.message", error.localizedDescription)
                 errorAlert.alertStyle = .warning
-                errorAlert.addButton(withTitle: "好的")
+                errorAlert.addButton(withTitle: L10n.tr("common.ok"))
                 errorAlert.runModal()
             }
         } else {

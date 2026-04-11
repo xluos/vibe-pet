@@ -4,6 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "VibePet",
+    defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.5.0")
@@ -13,7 +14,7 @@ let package = Package(
             name: "VibePet",
             dependencies: ["TOMLKit"],
             path: "Sources/VibePet",
-            resources: [.copy("Resources/Sounds")]
+            resources: [.process("Resources")]
         ),
         .executableTarget(
             name: "VibePetBridge",
