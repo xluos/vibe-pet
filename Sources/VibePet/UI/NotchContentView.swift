@@ -752,24 +752,31 @@ private struct AttentionBodyBorderView<S: Shape>: View {
             // Continuous wave ripples with shadow
             ForEach(Array(AttentionPulseStyle.hyperRippleDelays.enumerated()), id: \.offset) { index, delay in
                 if let ripple = phase.rippleProgress(delay: delay, activeWindow: 0.55) {
-                    shape
-                        .stroke(
-                            effectColor.opacity((1 - ripple) * (index == 0 ? 1.0 : 0.75)),
-                            lineWidth: max(1.5, 2.5 - ripple * 0.7)
-                        )
-                        .shadow(color: effectColor.opacity((1 - ripple) * 0.4), radius: 3 + ripple * 5)
-                        .blur(radius: ripple * 4)
-                        .scaleEffect(1.02 + ripple * (0.2 + CGFloat(index) * 0.06))
-                        .padding(
-                            metrics.outwardPadding(
-                                baseHeightRatio: 0.12 + CGFloat(index) * 0.09,
-                                animatedRatio: 0.42,
-                                phase: ripple
-                            )
-                        )
+                    hyperRippleLayer(index: index, ripple: ripple, metrics: metrics)
                 }
             }
         }
+    }
+
+    private func hyperRippleLayer(index: Int, ripple: CGFloat, metrics: AttentionEffectMetrics) -> some View {
+        let rippleOpacity = (1 - ripple) * (index == 0 ? 1.0 : 0.75)
+        let lineWidth = max(1.5, 2.5 - ripple * 0.7)
+        let shadowOpacity = (1 - ripple) * 0.4
+        let shadowRadius = 3 + ripple * 5
+        let blurRadius = ripple * 4
+        let scale = 1.02 + ripple * (0.2 + CGFloat(index) * 0.06)
+        let padding = metrics.outwardPadding(
+            baseHeightRatio: 0.12 + CGFloat(index) * 0.09,
+            animatedRatio: 0.42,
+            phase: ripple
+        )
+
+        return shape
+            .stroke(effectColor.opacity(rippleOpacity), lineWidth: lineWidth)
+            .shadow(color: effectColor.opacity(shadowOpacity), radius: shadowRadius)
+            .blur(radius: blurRadius)
+            .scaleEffect(scale)
+            .padding(padding)
     }
 
     private func attentionShakeBodyLayers(for phase: AttentionPulsePhase, metrics: AttentionEffectMetrics) -> some View {
