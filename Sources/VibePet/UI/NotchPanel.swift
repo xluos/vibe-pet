@@ -45,6 +45,7 @@ class NotchWindowController: NSWindowController {
     private let settingsContentHeight: CGFloat = 320
     private let sessionListBaseHeight: CGFloat = 56
     private let estimatedRowHeight: CGFloat = 68
+    private let maxVisibleSessionRows: Int = 4
     private let collapseDelay: TimeInterval = 0.25
     private let haloSideInset: CGFloat = 180
     private let haloTopInset: CGFloat = 20
@@ -411,7 +412,10 @@ class NotchWindowController: NSWindowController {
             return emptyStateHeight
         }
 
-        return sessionListBaseHeight + CGFloat(sessionStore.allSessions.count) * estimatedRowHeight
+        // Cap the panel at maxVisibleSessionRows worth of height; any
+        // additional sessions are reachable by scrolling inside the list.
+        let displayedRowCount = min(sessionStore.allSessions.count, maxVisibleSessionRows)
+        return sessionListBaseHeight + CGFloat(displayedRowCount) * estimatedRowHeight
     }
 
     private func currentPanelFrame() -> NSRect {

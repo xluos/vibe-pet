@@ -65,7 +65,7 @@ struct SettingsWindowView: View {
                     Text(L10n.tr("app.name"))
                         .font(.system(size: 20, weight: .bold, design: .rounded))
                         .foregroundColor(.primary)
-                    Text("v2.0.1")
+                    Text("v2.0.2")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                 }

@@ -6,7 +6,7 @@ PRODUCT_NAME = VibePet
 BUILD_DIR = .build/release
 BUNDLE_DIR = $(PRODUCT_NAME).app
 CONTENTS = $(BUNDLE_DIR)/Contents
-VERSION = 2.0.1
+VERSION = 2.0.2
 
 build:
 	swift build -c release

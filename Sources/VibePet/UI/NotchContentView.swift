@@ -354,6 +354,9 @@ struct NotchContentView: View {
                     .foregroundColor(Color.white.opacity(0.35))
                     .padding(.vertical, 16)
             } else {
+                // Drop .fixedSize so the ScrollView fills the bounded panel
+                // height (capped to 4 rows in NotchWindowController) and
+                // scrolls when more sessions are present.
                 ScrollView {
                     VStack(spacing: 2) {
                         ForEach(sessionStore.allSessions) { session in
@@ -363,7 +366,6 @@ struct NotchContentView: View {
                             .onTapGesture { viewModel.onSessionClick(session) }
                         }
                     }
-                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 8)
                     .padding(.top, ExpandedContentLayout.standardListTopPadding)
                     .padding(.bottom, ExpandedContentLayout.standardListBottomPadding)
