@@ -37,6 +37,14 @@ macOS 刘海区域的 AI 编程会话监控工具。当你同时开多个 Claude
 ### 从 DMG 安装
 [Release下载安装](https://github.com/flytomoon-tech/vibe-pet/releases)
 
+> 首次打开如果提示「Apple 无法验证 VibePet 是否包含恶意软件」，是因为 DMG 用 ad-hoc 签名（未做 Apple notarize）。任选一种方式绕过：
+>
+> - **设置面板**：「系统设置」→「隐私与安全性」→ 滚到底部找到「VibePet 已被阻止使用」→ 点「仍要打开」
+> - **右键打开**：在 `应用程序` 里右键 VibePet.app → 「打开」→ 弹窗里再点「打开」
+> - **终端一行**：`sudo xattr -dr com.apple.quarantine /Applications/VibePet.app`
+>
+> 只需绕过一次，之后双击就能正常启动。
+
 ### 从源码构建
 https://github.com/flytomoon-tech/vibe-pet/releases
 
