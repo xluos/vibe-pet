@@ -31,15 +31,24 @@ final class Session: Identifiable, Codable {
     var startedAt: Date
     var lastEventAt: Date
 
-    init(id: String, source: SessionSource, status: SessionStatus = .starting, cwd: String? = nil, tty: String? = nil, terminalBundleId: String? = nil) {
+    init(
+        id: String,
+        source: SessionSource,
+        status: SessionStatus = .starting,
+        cwd: String? = nil,
+        tty: String? = nil,
+        terminalBundleId: String? = nil,
+        startedAt: Date = Date(),
+        lastEventAt: Date = Date()
+    ) {
         self.id = id
         self.source = source
         self.status = status
         self.cwd = cwd
         self.tty = tty
         self.terminalBundleId = terminalBundleId
-        self.startedAt = Date()
-        self.lastEventAt = Date()
+        self.startedAt = startedAt
+        self.lastEventAt = lastEventAt
     }
 
     // Codable
@@ -77,5 +86,53 @@ final class Session: Identifiable, Codable {
         try c.encodeIfPresent(lastAssistantMessage, forKey: .lastAssistantMessage)
         try c.encode(startedAt, forKey: .startedAt)
         try c.encode(lastEventAt, forKey: .lastEventAt)
+    }
+}
+
+struct PersistedSession: Codable {
+    let id: String
+    let source: SessionSource
+    let status: SessionStatus
+    let cwd: String?
+    let tty: String?
+    let terminalBundleId: String?
+    let title: String?
+    let lastToolName: String?
+    let lastPrompt: String?
+    let lastAssistantMessage: String?
+    let startedAt: Date
+    let lastEventAt: Date
+
+    init(_ session: Session) {
+        id = session.id
+        source = session.source
+        status = session.status
+        cwd = session.cwd
+        tty = session.tty
+        terminalBundleId = session.terminalBundleId
+        title = session.title
+        lastToolName = session.lastToolName
+        lastPrompt = session.lastPrompt
+        lastAssistantMessage = session.lastAssistantMessage
+        startedAt = session.startedAt
+        lastEventAt = session.lastEventAt
+    }
+
+    func makeSession() -> Session {
+        let session = Session(
+            id: id,
+            source: source,
+            status: status,
+            cwd: cwd,
+            tty: tty,
+            terminalBundleId: terminalBundleId,
+            startedAt: startedAt,
+            lastEventAt: lastEventAt
+        )
+        session.title = title
+        session.lastToolName = lastToolName
+        session.lastPrompt = lastPrompt
+        session.lastAssistantMessage = lastAssistantMessage
+        return session
     }
 }

@@ -6,6 +6,7 @@ final class SessionTitleResolver {
     private let fileManager = FileManager.default
     private let queue = DispatchQueue(label: "VibePet.SessionTitleResolver", qos: .utility)
     private var cache: [String: String] = [:]
+    private var pendingCompletions: [String: [(String?) -> Void]] = [:]
 
     private init() {}
 
@@ -25,13 +26,29 @@ final class SessionTitleResolver {
                 return
             }
 
+            if self.pendingCompletions[cacheKey] != nil {
+                self.pendingCompletions[cacheKey, default: []].append(completion)
+                return
+            }
+            self.pendingCompletions[cacheKey] = [completion]
+
+            let lookupStart = PerfLog.now()
             let title = self.lookupTitle(sessionID: sessionID, source: source)
             if let title, !title.isEmpty {
                 self.cache[cacheKey] = title
             }
+            let lookupMs = PerfLog.elapsedMS(since: lookupStart)
+            let completions = self.pendingCompletions.removeValue(forKey: cacheKey) ?? []
+
+            if lookupMs >= 8 {
+                PerfLog.log(
+                    "session.title-resolve",
+                    "source=\(source.rawValue) session=\(sessionID) found=\(title != nil) totalMs=\(PerfLog.format(lookupMs))"
+                )
+            }
 
             DispatchQueue.main.async {
-                completion(title)
+                completions.forEach { $0(title) }
             }
         }
     }

@@ -24,6 +24,15 @@ class NotchWindowController: NSWindowController {
     private var acknowledgedAttentionStatuses: [String: SessionStatus] = [:]
     private var isMouseInsidePanel = false
     private var pendingPanelRefreshWorkItem: DispatchWorkItem?
+    private var pendingSessionStatusRefreshWorkItem: DispatchWorkItem?
+    private var pendingProactiveAttentionPopup = false
+    private var cachedExpandedContentSignature: String?
+    private var cachedExpandedContentHeight: CGFloat?
+    private var lastAttentionPresentationSignature: String?
+    private var lastMouseCompanionContentSignature: String?
+    private var lastAppliedPanelFrame: NSRect?
+    private var haloUpdateGeneration = 0
+    private var lastAppliedHaloSignature: String?
 
     private var collapsedWidth: CGFloat = 260
     private var collapsedHeight: CGFloat = 33
@@ -42,6 +51,7 @@ class NotchWindowController: NSWindowController {
     private let haloBottomInset: CGFloat = 72
     private let mouseCompanionSize = CGSize(width: 96, height: 68)
     private let mouseCompanionOffset = CGPoint(x: 10, y: 16)
+    private let sessionStatusRefreshDebounce: TimeInterval = 0.05
 
     init(sessionStore: SessionStore) {
         self.sessionStore = sessionStore
@@ -128,11 +138,13 @@ class NotchWindowController: NSWindowController {
         proactiveAttentionCollapseTimer?.invalidate()
         hoverCollapseWorkItem?.cancel()
         pendingPanelRefreshWorkItem?.cancel()
+        pendingSessionStatusRefreshWorkItem?.cancel()
     }
 
     func refreshScreenConfiguration() {
         let screen = activeScreen
         refreshMetrics(for: screen)
+        invalidateExpandedContentHeightCache()
         applyFrame()
         guard let panel = window as? NSPanel else { return }
         updateAttentionHalo(relativeTo: panel)
@@ -179,6 +191,7 @@ class NotchWindowController: NSWindowController {
             refreshMetrics(for: focusScreen)
         }
         expandedPresentation = presentation
+        invalidateExpandedContentHeightCache()
         cancelPendingCollapse()
         proactiveAttentionCollapseTimer?.invalidate()
 
@@ -207,8 +220,7 @@ class NotchWindowController: NSWindowController {
         proactiveAttentionCollapseTimer?.invalidate()
         cancelPendingCollapse()
         expandedPresentation = .collapsed
-        viewModel.attentionPresentation = .hidden
-        viewModel.attentionSessionIDs = []
+        _ = syncAttentionPresentation()
         if wasTransientAttention {
             transientPresentationScreen = nil
             refreshMetrics(for: preferredScreen)
@@ -218,6 +230,7 @@ class NotchWindowController: NSWindowController {
             viewModel.showSettings = false
         }
 
+        invalidateExpandedContentHeightCache()
         applyFrame()
         updateAttentionHalo(relativeTo: panel)
         updateMouseCompanion()
@@ -230,6 +243,7 @@ class NotchWindowController: NSWindowController {
     /// Resize panel when switching to/from settings
     func updatePanelSize() {
         guard let panel = window as? NSPanel, isExpanded else { return }
+        invalidateExpandedContentHeightCache()
         applyFrame()
         updateAttentionHalo(relativeTo: panel)
         updateMouseCompanion()
@@ -274,9 +288,29 @@ class NotchWindowController: NSWindowController {
 
     @objc
     private func handleSessionStatusChanged(_ notification: Notification) {
+        let oldStatus = SessionStatus(rawValue: notification.userInfo?["oldStatus"] as? String ?? "")
+        let newStatus = SessionStatus(rawValue: notification.userInfo?["newStatus"] as? String ?? "")
+        pendingProactiveAttentionPopup = pendingProactiveAttentionPopup
+            || shouldShowProactiveAttentionPopup(oldStatus: oldStatus, newStatus: newStatus)
+        scheduleSessionStatusRefresh()
+    }
+
+    private func scheduleSessionStatusRefresh() {
+        pendingSessionStatusRefreshWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.applySessionStatusRefresh()
+        }
+        pendingSessionStatusRefreshWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + sessionStatusRefreshDebounce, execute: workItem)
+    }
+
+    private func applySessionStatusRefresh() {
         guard let panel = window as? NSPanel else { return }
+        let refreshStart = PerfLog.now()
         pruneAcknowledgedAttentionSessions()
-        syncAttentionPresentation()
+        let presentationChanged = syncAttentionPresentation()
+        invalidateExpandedContentHeightCacheIfNeeded()
         updateAttentionHalo(relativeTo: panel)
         updateMouseCompanion()
 
@@ -284,24 +318,29 @@ class NotchWindowController: NSWindowController {
             updatePanelSize()
         }
 
-        let oldStatus = SessionStatus(rawValue: notification.userInfo?["oldStatus"] as? String ?? "")
-        let newStatus = SessionStatus(rawValue: notification.userInfo?["newStatus"] as? String ?? "")
-        if shouldShowProactiveAttentionPopup(oldStatus: oldStatus, newStatus: newStatus) {
+        if pendingProactiveAttentionPopup {
+            pendingProactiveAttentionPopup = false
             showProactiveAttentionPopup()
-            return
-        }
-
-        if expandedPresentation == .transientAttention {
+        } else if expandedPresentation == .transientAttention {
             if visibleAttentionSessions.isEmpty {
                 collapseExpanded()
             } else {
                 updatePanelSize()
             }
         }
+
+        let refreshMs = PerfLog.elapsedMS(since: refreshStart)
+        if refreshMs >= 12 {
+            PerfLog.log(
+                "notch.session-refresh",
+                "presentationChanged=\(presentationChanged) expanded=\(isExpanded) visibleAttention=\(visibleAttentionSessions.count) totalMs=\(PerfLog.format(refreshMs))"
+            )
+        }
     }
 
     @objc
     private func handleLanguageChanged() {
+        invalidateExpandedContentHeightCache()
         refreshAttentionUI()
     }
 
@@ -322,6 +361,7 @@ class NotchWindowController: NSWindowController {
         expandedWidth = nextMetrics.expandedWidth
         viewModel?.notchWidth = nextMetrics.collapsedWidth
         viewModel?.notchHeight = nextMetrics.collapsedHeight
+        invalidateExpandedContentHeightCache()
     }
 
     private static func panelFrame(for screen: NSScreen, width: CGFloat, height: CGFloat) -> NSRect {
@@ -344,42 +384,34 @@ class NotchWindowController: NSWindowController {
             return min(settingsContentHeight, maxExpandedContentHeight)
         }
 
+        let signature = expandedContentSignature()
         let rawHeight: CGFloat
-        if let offscreenMeasuredHeight = measureExpandedContentHeightOffscreen() {
-            rawHeight = offscreenMeasuredHeight
-        } else if expandedPresentation == .transientAttention {
-            let count = max(visibleAttentionSessions.count, 1)
-            let perRow: CGFloat = 152
-            let headerHeight: CGFloat = 41
-            let dividerHeight: CGFloat = 1
-            let verticalPadding: CGFloat = 24
-            rawHeight = CGFloat(count) * perRow + headerHeight + dividerHeight + verticalPadding
-        } else if sessionStore.allSessions.isEmpty {
-            rawHeight = emptyStateHeight
+        if cachedExpandedContentSignature == signature, let cachedExpandedContentHeight {
+            rawHeight = cachedExpandedContentHeight
         } else {
-            rawHeight = sessionListBaseHeight + CGFloat(sessionStore.allSessions.count) * estimatedRowHeight
+            rawHeight = estimatedExpandedContentHeight()
+            cachedExpandedContentSignature = signature
+            cachedExpandedContentHeight = rawHeight
         }
 
         return min(rawHeight, maxExpandedContentHeight)
     }
 
-    private func measureExpandedContentHeightOffscreen() -> CGFloat? {
-        guard let viewModel else { return nil }
-        guard !viewModel.showSettings else { return settingsContentHeight }
+    private func estimatedExpandedContentHeight() -> CGFloat {
+        if expandedPresentation == .transientAttention {
+            let count = max(visibleAttentionSessions.count, 1)
+            let perRow: CGFloat = 152
+            let headerHeight: CGFloat = 41
+            let dividerHeight: CGFloat = 1
+            let verticalPadding: CGFloat = 24
+            return CGFloat(count) * perRow + headerHeight + dividerHeight + verticalPadding
+        }
 
-        let rootView = NotchExpandedMeasureView(
-            petState: currentPetState,
-            attentionAccentColor: attentionGlowColor,
-            sessions: sessionStore.allSessions,
-            attentionSessions: visibleAttentionSessions,
-            showsTransientAttentionPanel: expandedPresentation == .transientAttention && !visibleAttentionSessions.isEmpty
-        )
-        .frame(width: expandedWidth)
+        if sessionStore.allSessions.isEmpty {
+            return emptyStateHeight
+        }
 
-        let hostingView = NSHostingView(rootView: rootView)
-        let fittingSize = hostingView.fittingSize
-        let measuredHeight = fittingSize.height
-        return measuredHeight > 0.5 ? measuredHeight : nil
+        return sessionListBaseHeight + CGFloat(sessionStore.allSessions.count) * estimatedRowHeight
     }
 
     private func currentPanelFrame() -> NSRect {
@@ -391,7 +423,10 @@ class NotchWindowController: NSWindowController {
 
     private func applyFrame() {
         guard let panel = window as? NSPanel else { return }
-        panel.setFrame(currentPanelFrame(), display: true)
+        let targetFrame = currentPanelFrame()
+        guard lastAppliedPanelFrame != targetFrame || panel.frame != targetFrame else { return }
+        panel.setFrame(targetFrame, display: true)
+        lastAppliedPanelFrame = targetFrame
     }
 
     private func cancelPendingCollapse() {
@@ -473,14 +508,21 @@ class NotchWindowController: NSWindowController {
     private func updateAttentionHalo(relativeTo panel: NSPanel) {
         let shouldShowHalo = !isExpanded && sessionStore.hasSessionNeedingAttention
         let frame = haloFrame(relativeTo: panel.frame)
+        let signature = haloSignature(shouldShowHalo: shouldShowHalo, frame: frame)
+
+        guard signature != lastAppliedHaloSignature else { return }
+        haloUpdateGeneration += 1
+        let generation = haloUpdateGeneration
 
         // Avoid forcing child-window relayout from inside the current AppKit/SwiftUI
         // layout pass; doing it synchronously can trip AttributeGraph preconditions.
         DispatchQueue.main.async { [weak self, weak panel] in
             guard let self, let haloPanel = self.haloPanel else { return }
+            guard generation == self.haloUpdateGeneration else { return }
 
             if !shouldShowHalo {
                 haloPanel.orderOut(nil)
+                self.lastAppliedHaloSignature = signature
                 return
             }
 
@@ -501,6 +543,8 @@ class NotchWindowController: NSWindowController {
             } else {
                 haloPanel.orderFront(nil)
             }
+
+            self.lastAppliedHaloSignature = signature
         }
     }
 
@@ -557,22 +601,30 @@ class NotchWindowController: NSWindowController {
             && (mouseCompanionShowsCat || mouseCompanionShowsBubble)
 
         guard let companion = mouseCompanionPanel else { return }
+        let contentSignature = mouseCompanionContentSignature(
+            shouldShowCompanion: shouldShowCompanion,
+            attentionSignature: attentionSignature
+        )
 
         if !shouldShowCompanion {
             mouseTrackingTimer?.invalidate()
             mouseTrackingTimer = nil
             lastMouseTrackingSample = nil
             companion.orderOut(nil)
+            lastMouseCompanionContentSignature = contentSignature
             return
         }
 
-        mouseCompanionHostingView?.rootView = MouseCompanionRootView(
-            petState: .needsAttention,
-            color: attentionGlowColor,
-            message: mouseCompanionMessage,
-            showsCat: mouseCompanionShowsCat,
-            showsBubble: mouseCompanionShowsBubble
-        )
+        if lastMouseCompanionContentSignature != contentSignature {
+            mouseCompanionHostingView?.rootView = MouseCompanionRootView(
+                petState: .needsAttention,
+                color: attentionGlowColor,
+                message: mouseCompanionMessage,
+                showsCat: mouseCompanionShowsCat,
+                showsBubble: mouseCompanionShowsBubble
+            )
+            lastMouseCompanionContentSignature = contentSignature
+        }
         repositionMouseCompanion()
 
         if mouseTrackingTimer == nil {
@@ -848,15 +900,22 @@ class NotchWindowController: NSWindowController {
         }
     }
 
-    private func syncAttentionPresentation() {
-        guard let viewModel else { return }
+    @discardableResult
+    private func syncAttentionPresentation() -> Bool {
+        guard let viewModel else { return false }
+        let attentionIDs = visibleAttentionSessions.map(\.id)
+        let signature = attentionPresentationSignature(attentionIDs: attentionIDs)
+        guard signature != lastAttentionPresentationSignature else { return false }
+
         if expandedPresentation == .transientAttention {
             viewModel.attentionPresentation = .transient
-            viewModel.attentionSessionIDs = visibleAttentionSessions.map(\.id)
+            viewModel.attentionSessionIDs = attentionIDs
         } else {
             viewModel.attentionPresentation = .hidden
             viewModel.attentionSessionIDs = []
         }
+        lastAttentionPresentationSignature = signature
+        return true
     }
 
     private func pruneAcknowledgedAttentionSessions() {
@@ -879,6 +938,68 @@ class NotchWindowController: NSWindowController {
     private func archiveAttentionSession(_ session: Session) {
         acknowledgedAttentionStatuses.removeValue(forKey: session.id)
         sessionStore.archiveSession(session)
+    }
+
+    private func expandedContentSignature() -> String {
+        let settingsShown = viewModel?.showSettings == true
+        return [
+            expandedPresentationKey,
+            settingsShown ? "settings" : "content",
+            String(format: "%.1f", expandedWidth),
+            String(format: "%.1f", collapsedHeight),
+            "sessions=\(sessionStore.allSessions.count)",
+            "attention=\(visibleAttentionSessions.count)",
+        ].joined(separator: "#")
+    }
+
+    private func invalidateExpandedContentHeightCache() {
+        cachedExpandedContentSignature = nil
+        cachedExpandedContentHeight = nil
+    }
+
+    private func invalidateExpandedContentHeightCacheIfNeeded() {
+        let signature = expandedContentSignature()
+        if cachedExpandedContentSignature != signature {
+            invalidateExpandedContentHeightCache()
+        }
+    }
+
+    private func attentionPresentationSignature(attentionIDs: [String]) -> String {
+        "\(expandedPresentationKey)|\(attentionIDs.joined(separator: ","))"
+    }
+
+    private func haloSignature(shouldShowHalo: Bool, frame: NSRect) -> String {
+        [
+            shouldShowHalo ? "shown" : "hidden",
+            currentPetState == .needsAttention ? "needsApproval" : "other",
+            AttentionAnimationPreferences.resolvedVariant().rawValue,
+            String(format: "%.1f", frame.origin.x),
+            String(format: "%.1f", frame.origin.y),
+            String(format: "%.1f", frame.size.width),
+            String(format: "%.1f", frame.size.height),
+        ].joined(separator: "|")
+    }
+
+    private func mouseCompanionContentSignature(shouldShowCompanion: Bool, attentionSignature: String) -> String {
+        [
+            shouldShowCompanion ? "shown" : "hidden",
+            attentionSignature,
+            mouseCompanionMessage,
+            mouseCompanionShowsCat ? "cat" : "no-cat",
+            mouseCompanionShowsBubble ? "bubble" : "no-bubble",
+            currentPetState == .needsAttention ? "needsAttention" : "other",
+        ].joined(separator: "|")
+    }
+
+    private var expandedPresentationKey: String {
+        switch expandedPresentation {
+        case .collapsed:
+            return "collapsed"
+        case .manual:
+            return "manual"
+        case .transientAttention:
+            return "transientAttention"
+        }
     }
 
     private var isMouseInsideTransientAttentionPanel: Bool {

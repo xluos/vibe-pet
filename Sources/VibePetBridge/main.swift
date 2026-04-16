@@ -4,6 +4,8 @@ import Foundation
 // Invoked by Claude Code / Codex hooks. Reads stdin + env, sends JSON to the main app via Unix socket.
 
 let logFile = "/tmp/vibe-pet-bridge.log"
+let performanceThresholdMS = 4.0
+let verboseBridgeLogs = ProcessInfo.processInfo.environment["VIBEPET_BRIDGE_VERBOSE_LOGS"] == "1"
 
 func log(_ msg: String) {
     let ts = ISO8601DateFormatter().string(from: Date())
@@ -15,6 +17,23 @@ func log(_ msg: String) {
     } else {
         FileManager.default.createFile(atPath: logFile, contents: Data(line.utf8))
     }
+}
+
+func debugLog(_ msg: String) {
+    guard verboseBridgeLogs else { return }
+    log(msg)
+}
+
+func now() -> UInt64 {
+    DispatchTime.now().uptimeNanoseconds
+}
+
+func elapsedMS(since start: UInt64) -> Double {
+    Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+}
+
+func formatMS(_ value: Double) -> String {
+    String(format: "%.2f", value)
 }
 
 func normalizeEvent(_ event: String) -> String {
@@ -34,8 +53,9 @@ func normalizeEvent(_ event: String) -> String {
 }
 
 func main() {
+    let totalStart = now()
     let args = CommandLine.arguments
-    log("Bridge started, args: \(args)")
+    debugLog("Bridge started, args: \(args)")
 
     // Parse --source flag
     var source = "unknown"
@@ -44,16 +64,19 @@ func main() {
     }
 
     // Read stdin (hook context JSON from Claude Code / Codex)
+    let stdinStart = now()
     var stdinData = Data()
     while let line = readLine(strippingNewline: false) {
         stdinData.append(Data(line.utf8))
     }
-    log("Read \(stdinData.count) bytes from stdin")
+    let stdinReadMs = elapsedMS(since: stdinStart)
+    debugLog("Read \(stdinData.count) bytes from stdin")
     if let stdinStr = String(data: stdinData, encoding: .utf8) {
-        log("stdin: \(stdinStr.prefix(500))")
+        debugLog("stdin: \(stdinStr.prefix(500))")
     }
 
     // Parse hook event name from stdin JSON
+    let parseStart = now()
     var hookEvent = "Unknown"
     var sessionId: String?
     var toolName: String?
@@ -82,6 +105,7 @@ func main() {
             transcriptPath = path
         }
     }
+    let jsonParseMs = elapsedMS(since: parseStart)
 
     // Collect environment variables
     let env = ProcessInfo.processInfo.environment
@@ -94,8 +118,15 @@ func main() {
         sessionId = "pid-\(ProcessInfo.processInfo.processIdentifier)"
     }
 
-    let tty = detectTTY()
     let terminalBundleId = env["__CFBundleIdentifier"] ?? detectTerminalBundleId(from: env)
+    let ttyStart = now()
+    let tty: String?
+    if terminalBundleId == "com.apple.Terminal" || terminalBundleId == "com.googlecode.iterm2" {
+        tty = detectTTY(from: env)
+    } else {
+        tty = env["TTY"] ?? env["SSH_TTY"]
+    }
+    let ttyDetectMs = elapsedMS(since: ttyStart)
     let cwd = env["CLAUDE_CWD"] ?? env["PWD"]
 
     // Build message
@@ -122,18 +153,38 @@ func main() {
     }
     jsonString += "\n"
 
-    log("Sending to socket: \(jsonString.trimmingCharacters(in: .whitespacesAndNewlines))")
+    debugLog("Sending to socket: \(jsonString.trimmingCharacters(in: .whitespacesAndNewlines))")
 
     // Send to Unix socket
+    let socketStart = now()
     sendToSocket(jsonString)
-    log("Bridge done")
+    let socketWriteMs = elapsedMS(since: socketStart)
+    let totalMs = elapsedMS(since: totalStart)
+
+    if totalMs >= performanceThresholdMS || ttyDetectMs >= performanceThresholdMS {
+        log(
+            "PERF event=\(hookEvent) source=\(source) session=\(sessionId ?? "unknown") bytes=\(stdinData.count) stdinMs=\(formatMS(stdinReadMs)) parseMs=\(formatMS(jsonParseMs)) ttyMs=\(formatMS(ttyDetectMs)) socketMs=\(formatMS(socketWriteMs)) totalMs=\(formatMS(totalMs)) terminal=\(terminalBundleId ?? "unknown") tty=\(tty ?? "nil")"
+        )
+    } else {
+        debugLog(
+            "PERF event=\(hookEvent) source=\(source) session=\(sessionId ?? "unknown") bytes=\(stdinData.count) stdinMs=\(formatMS(stdinReadMs)) parseMs=\(formatMS(jsonParseMs)) ttyMs=\(formatMS(ttyDetectMs)) socketMs=\(formatMS(socketWriteMs)) totalMs=\(formatMS(totalMs))"
+        )
+    }
+    debugLog("Bridge done")
 }
 
-func detectTTY() -> String? {
+func detectTTY(from env: [String: String]) -> String? {
+    if let tty = env["TTY"], !tty.isEmpty {
+        return tty.hasPrefix("/dev/") ? tty : "/dev/\(tty)"
+    }
+    if let sshTTY = env["SSH_TTY"], !sshTTY.isEmpty {
+        return sshTTY
+    }
+
     var pid = ProcessInfo.processInfo.processIdentifier
 
     // Walk up the process tree to find a TTY
-    for _ in 0..<10 {
+    for _ in 0..<6 {
         let pipe = Pipe()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/ps")
@@ -217,11 +268,11 @@ func sendToSocket(_ message: String) {
         return
     }
 
-    log("Connected to socket")
+    debugLog("Connected to socket")
     let written = message.utf8CString.withUnsafeBufferPointer { buf in
         write(fd, buf.baseAddress!, message.utf8.count)
     }
-    log("Wrote \(written) bytes to socket")
+    debugLog("Wrote \(written) bytes to socket")
 }
 
 main()
