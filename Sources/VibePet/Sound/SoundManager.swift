@@ -11,6 +11,7 @@ enum SoundEvent: String, CaseIterable {
 
 final class SoundManager {
     static let shared = SoundManager()
+    static let volumeKey = "vibepet.soundVolume"
 
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
@@ -18,19 +19,33 @@ final class SoundManager {
     private var strongAttentionBuffers: [AttentionAnimationVariant: AVAudioPCMBuffer] = [:]
     private var isReady = false
     private var outputFormat: AVAudioFormat?
+    private var volumeObserver: Any?
 
     private init() {
         setupEngine()
+        applyUserVolume()
         generateBuiltInSounds()
+
+        // Volume is stored in UserDefaults by SettingsView via @AppStorage.
+        // Mirror changes into the mixer so the slider takes effect live.
+        volumeObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.applyUserVolume()
+        }
+    }
+
+    deinit {
+        if let volumeObserver {
+            NotificationCenter.default.removeObserver(volumeObserver)
+        }
     }
 
     private func setupEngine() {
         engine.attach(playerNode)
-
-        // Use the mixer's output format so buffers match
-        let format = engine.mainMixerNode.outputFormat(forBus: 0)
-        outputFormat = format
-        engine.connect(playerNode, to: engine.mainMixerNode, format: format)
+        reconnectPlayer()
 
         startEngine()
 
@@ -40,6 +55,17 @@ final class SoundManager {
             name: .AVAudioEngineConfigurationChange,
             object: engine
         )
+    }
+
+    /// Connect (or reconnect) the player node to the mixer using the mixer's
+    /// current output format. Must be called whenever the engine configuration
+    /// changes (audio route switch, sample-rate change, device swap) because
+    /// the previous connection format becomes stale.
+    private func reconnectPlayer() {
+        let format = engine.mainMixerNode.outputFormat(forBus: 0)
+        outputFormat = format
+        engine.disconnectNodeOutput(playerNode)
+        engine.connect(playerNode, to: engine.mainMixerNode, format: format)
     }
 
     private func startEngine() {
@@ -53,8 +79,31 @@ final class SoundManager {
     }
 
     @objc private func handleEngineConfigChange(_ notification: Notification) {
+        // Audio route changed (headphones, AirPods, HDMI, sample-rate switch).
+        // The mixer's output format may have changed, which invalidates both
+        // the player-node connection and every pre-generated buffer. Rebuild
+        // both so playback keeps working without requiring an app restart.
         isReady = false
+        playerNode.stop()
+        reconnectPlayer()
+        generateBuiltInSounds()
         startEngine()
+        applyUserVolume()
+    }
+
+    private func applyUserVolume() {
+        let defaults = UserDefaults.standard
+        // Default to 0.5 to match the SettingsView @AppStorage default so the
+        // first launch doesn't surprise users with a louder-than-shown level.
+        let stored = defaults.object(forKey: Self.volumeKey) == nil
+            ? 0.5
+            : defaults.double(forKey: Self.volumeKey)
+        let clamped = max(0.0, min(1.0, stored))
+        let newVolume = Float(clamped)
+        let mixerVolume = engine.mainMixerNode.outputVolume
+        if abs(mixerVolume - newVolume) > 0.001 {
+            engine.mainMixerNode.outputVolume = newVolume
+        }
     }
 
     func play(_ event: SoundEvent) {
@@ -69,6 +118,7 @@ final class SoundManager {
 
     func playStrongAttention(for variant: AttentionAnimationVariant) {
         DispatchQueue.main.async { [self] in
+            if !engine.isRunning { startEngine() }
             guard isReady else { return }
 
             let resolvedVariant: AttentionAnimationVariant = variant == .subtle
@@ -88,6 +138,11 @@ final class SoundManager {
         guard let format = outputFormat else { return }
         let sampleRate = format.sampleRate
         let channels = Int(format.channelCount)
+
+        // Drop any stale buffers that were generated against the previous
+        // output format before regenerating for the current one.
+        buffers.removeAll(keepingCapacity: true)
+        strongAttentionBuffers.removeAll(keepingCapacity: true)
 
         buffers[.sessionStart] = generateToneSequence(
             frequencies: [523.25, 659.25, 783.99],

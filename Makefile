@@ -6,7 +6,7 @@ PRODUCT_NAME = VibePet
 BUILD_DIR = .build/release
 BUNDLE_DIR = $(PRODUCT_NAME).app
 CONTENTS = $(BUNDLE_DIR)/Contents
-VERSION = 1.0.0
+VERSION = 2.0.1
 
 build:
 	swift build -c release
@@ -20,6 +20,11 @@ bundle: build
 	cp Info.plist $(CONTENTS)/Info.plist
 	cp VibePet.icns $(CONTENTS)/Resources/VibePet.icns
 	-cp Sources/VibePet/Resources/Sounds/*.wav $(CONTENTS)/Resources/Sounds/ 2>/dev/null || true
+	# Copy SPM-processed .lproj bundles into Contents/Resources so Bundle.main
+	# finds them. The SPM-generated VibePet_VibePet.bundle expects to live at
+	# the .app root, which codesign rejects as unsealed content.
+	rm -rf $(CONTENTS)/Resources/*.lproj
+	-cp -R $(BUILD_DIR)/VibePet_VibePet.bundle/*.lproj $(CONTENTS)/Resources/ 2>/dev/null || true
 	@echo "Built $(BUNDLE_DIR)"
 
 # Ad-hoc sign (required for distribution without Developer ID)
