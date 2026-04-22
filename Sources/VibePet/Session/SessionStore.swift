@@ -5,10 +5,12 @@ final class SessionStore {
     var sessions: [String: Session] = [:]
     private var pendingCodexAppSessions: [String: Session] = [:]
     private let endedSessionRetentionDays = 7
-    private let codexTitlePromptMarkers = [
-        "you are a helpful assistant. you will be presented with a user prompt",
+    // Codex 启动项目时会并发跑多条内部自动化 session（标题生成 / ambient 建议 / ambient 安全过滤），
+    // 它们的 prompt 都是固定模板，这里按 prompt 特征识别后直接丢弃，避免出现多余的会话条目和提示音。
+    private let codexInternalPromptFingerprints: [String] = [
         "provide a short title for a task",
-        "the tasks typically have to do with coding",
+        "generate 0 to 3 ambient suggestions",
+        "upholding safety and compliance standards for codex ambient suggestions",
     ]
 
     private static var storePath: URL {
@@ -20,7 +22,7 @@ final class SessionStore {
     init() {
         load()
         let beforePurgeCount = sessions.count
-        purgeInternalCodexTitleSessions()
+        purgeInternalCodexAutomationSessions()
         purgeExpiredEndedSessions()
         if sessions.count != beforePurgeCount {
             save()
@@ -32,28 +34,28 @@ final class SessionStore {
 
     var activeSessions: [Session] {
         sessions.values
-            .filter { !isInternalCodexTitleSession($0) }
+            .filter { !isInternalCodexAutomationSession($0) }
             .filter { $0.status != .ended && $0.status != .archived }
             .sorted { $0.lastEventAt > $1.lastEventAt }
     }
 
     var allSessions: [Session] {
         sessions.values
-            .filter { !isInternalCodexTitleSession($0) }
+            .filter { !isInternalCodexAutomationSession($0) }
             .filter { $0.status != .archived }
             .sorted { $0.lastEventAt > $1.lastEventAt }
     }
 
     var archivedSessions: [Session] {
         sessions.values
-            .filter { !isInternalCodexTitleSession($0) }
+            .filter { !isInternalCodexAutomationSession($0) }
             .filter { $0.status == .archived }
             .sorted { $0.lastEventAt > $1.lastEventAt }
     }
 
     var hasSessionNeedingAttention: Bool {
         sessions.values.contains {
-            !isInternalCodexTitleSession($0) && ($0.status == .needsApproval || $0.status == .waitingForInput)
+            !isInternalCodexAutomationSession($0) && ($0.status == .needsApproval || $0.status == .waitingForInput)
         }
     }
 
@@ -63,7 +65,7 @@ final class SessionStore {
 
     var attentionSessions: [Session] {
         sessions.values
-            .filter { !isInternalCodexTitleSession($0) }
+            .filter { !isInternalCodexAutomationSession($0) }
             .filter { $0.status == .needsApproval || $0.status == .waitingForInput }
             .sorted {
                 let lhsPriority = attentionPriority(for: $0.status)
@@ -77,7 +79,7 @@ final class SessionStore {
 
     var hasActiveSession: Bool {
         sessions.values.contains {
-            !isInternalCodexTitleSession($0) && ($0.status == .active || $0.status == .starting)
+            !isInternalCodexAutomationSession($0) && ($0.status == .active || $0.status == .starting)
         }
     }
 
@@ -116,7 +118,7 @@ final class SessionStore {
 
         // Codex creates an internal "title generation" task before the real task starts.
         // It has its own session id and should not be rendered as a user-facing session.
-        if isInternalCodexTitleSession(session) {
+        if isInternalCodexAutomationSession(session) {
             pendingCodexAppSessions.removeValue(forKey: message.sessionId)
             sessions.removeValue(forKey: message.sessionId)
             save()
@@ -242,9 +244,9 @@ final class SessionStore {
         }
     }
 
-    private func purgeInternalCodexTitleSessions() {
+    private func purgeInternalCodexAutomationSessions() {
         sessions = sessions.filter { _, session in
-            !isInternalCodexTitleSession(session)
+            !isInternalCodexAutomationSession(session)
         }
     }
 
@@ -266,22 +268,23 @@ final class SessionStore {
         return !hasVisiblePrompt && !hasVisibleAssistantMessage
     }
 
-    private func isInternalCodexTitleSession(_ session: Session) -> Bool {
+    private func isInternalCodexAutomationSession(_ session: Session) -> Bool {
         guard session.source == .codex else { return false }
         let prompt = session.lastPrompt?.lowercased() ?? ""
         let assistantMessage = session.lastAssistantMessage?.lowercased() ?? ""
         let fromCodexApp = session.terminalBundleId == "com.openai.codex"
 
-        let promptLooksLikeTitleGeneration = codexTitlePromptMarkers.filter { prompt.contains($0) }.count >= 2
+        let promptMatchesInternalTemplate = codexInternalPromptFingerprints.contains { prompt.contains($0) }
         let assistantLooksLikeTitleJSON = assistantMessage.contains("\"title\"")
             && assistantMessage.contains("{")
             && assistantMessage.contains("}")
 
-        // Title-generation sessions are usually emitted by Codex app and contain either:
-        // 1) the known title-generation system prompt template, or
-        // 2) a compact JSON-style title response like {"title":"..."}.
-        return (fromCodexApp && (promptLooksLikeTitleGeneration || assistantLooksLikeTitleJSON))
-            || (promptLooksLikeTitleGeneration && assistantLooksLikeTitleJSON)
+        // Codex app internal automation sessions look like one of:
+        // 1) prompt matches a known internal template (title generation, ambient suggestions, safety filter), or
+        // 2) assistant message is a compact JSON-style title response like {"title":"..."}
+        //    (kept for title sessions where we only ever see the Stop event).
+        return (fromCodexApp && (promptMatchesInternalTemplate || assistantLooksLikeTitleJSON))
+            || (promptMatchesInternalTemplate && assistantLooksLikeTitleJSON)
     }
 
     private func attentionPriority(for status: SessionStatus) -> Int {
