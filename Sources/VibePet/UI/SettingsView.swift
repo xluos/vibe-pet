@@ -53,6 +53,7 @@ struct SettingsWindowView: View {
     @State private var displayOptions = DisplayPreferences.availableDisplays()
     @State private var proactiveAttentionPopupDelayText = String(format: "%.1f", AttentionAnimationPreferences.defaultProactivePopupAutoCollapseDelay)
     @FocusState private var isProactivePopupDelayFieldFocused: Bool
+    @State private var directoryFilterRules: [DirectoryFilterRule] = DirectoryFilterPreferences.loadRules()
 
     var body: some View {
         ScrollView {
@@ -122,6 +123,11 @@ struct SettingsWindowView: View {
                         Divider().padding(.leading, 40)
                         settingsShakePresetRow(L10n.tr("settings.shakeSensitivity"), icon: "dial.medium", iconColor: .mint)
                     }
+                }
+
+                // Directory filter
+                settingsSection(L10n.tr("settings.section.directoryFilter")) {
+                    directoryFilterListContent
                 }
 
                 // Hooks
@@ -194,6 +200,107 @@ struct SettingsWindowView: View {
             languageRefreshID = UUID()
             SettingsWindowController.shared?.window?.title = L10n.tr("settings.windowTitle")
         }
+        .onChange(of: directoryFilterRules) { _, newValue in
+            DirectoryFilterPreferences.saveRules(newValue)
+        }
+    }
+
+    // MARK: - Directory filter
+
+    @ViewBuilder
+    private var directoryFilterListContent: some View {
+        if directoryFilterRules.isEmpty {
+            HStack(spacing: 10) {
+                iconBadge("line.3.horizontal.decrease.circle", color: .gray)
+                Text(L10n.tr("settings.directoryFilter.empty"))
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .frame(height: 32)
+        } else {
+            ForEach(directoryFilterRules) { rule in
+                if let index = directoryFilterRules.firstIndex(where: { $0.id == rule.id }) {
+                    if index > 0 {
+                        Divider().padding(.leading, 40)
+                    }
+                    directoryFilterRuleRow(index: index)
+                }
+            }
+        }
+        Divider().padding(.leading, 40)
+        directoryFilterAddRow()
+    }
+
+    private func directoryFilterRuleRow(index: Int) -> some View {
+        let rule = directoryFilterRules[index]
+        let patternBinding = Binding<String>(
+            get: {
+                guard directoryFilterRules.indices.contains(index),
+                      directoryFilterRules[index].id == rule.id else { return rule.pattern }
+                return directoryFilterRules[index].pattern
+            },
+            set: { newValue in
+                guard directoryFilterRules.indices.contains(index),
+                      directoryFilterRules[index].id == rule.id else { return }
+                directoryFilterRules[index].pattern = newValue
+            }
+        )
+
+        return HStack(spacing: 10) {
+            iconBadge("folder.badge.minus", color: .purple)
+            TextField(L10n.tr("settings.directoryFilter.placeholder"), text: patternBinding)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12))
+            Button {
+                guard directoryFilterRules.indices.contains(index),
+                      directoryFilterRules[index].id == rule.id else { return }
+                directoryFilterRules[index].isRegex.toggle()
+            } label: {
+                Text(L10n.tr("settings.directoryFilter.regexToggle"))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(rule.isRegex ? .white : .primary)
+                    .padding(.horizontal, 8)
+                    .frame(height: 22)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(rule.isRegex ? Color.accentColor : Color(nsColor: .controlBackgroundColor))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(rule.isRegex ? Color.accentColor.opacity(0.9) : Color.primary.opacity(0.15), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .help(L10n.tr("settings.directoryFilter.regexHelp"))
+            Button {
+                directoryFilterRules.removeAll { $0.id == rule.id }
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.red)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(height: 36)
+    }
+
+    private func directoryFilterAddRow() -> some View {
+        Button {
+            directoryFilterRules.append(DirectoryFilterRule())
+        } label: {
+            HStack(spacing: 10) {
+                iconBadge("plus", color: .blue)
+                Text(L10n.tr("settings.directoryFilter.add"))
+                    .font(.system(size: 13))
+                    .foregroundColor(.primary)
+                Spacer()
+            }
+            .frame(height: 32)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Section

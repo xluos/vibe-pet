@@ -5,6 +5,12 @@
 "settings.section.display" = "显示";
 "settings.section.attention" = "提醒";
 "settings.section.mouseCompanion" = "鼠标跟随";
+"settings.section.directoryFilter" = "目录过滤";
+"settings.directoryFilter.empty" = "暂无过滤规则";
+"settings.directoryFilter.add" = "添加过滤规则";
+"settings.directoryFilter.placeholder" = "匹配的目录路径";
+"settings.directoryFilter.regexToggle" = "正则";
+"settings.directoryFilter.regexHelp" = "启用后按正则表达式匹配，否则按子串（忽略大小写）";
 "settings.section.hooks" = "Hooks";
 "settings.section.data" = "数据";
 "settings.notificationSounds" = "通知音效";

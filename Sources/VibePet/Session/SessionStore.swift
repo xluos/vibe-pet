@@ -84,6 +84,11 @@ final class SessionStore {
     // MARK: - Events
 
     func handleEvent(_ message: BridgeMessage) {
+        let effectiveCwd = message.cwd ?? sessions[message.sessionId]?.cwd ?? pendingCodexAppSessions[message.sessionId]?.cwd
+        if DirectoryFilterPreferences.shouldFilter(cwd: effectiveCwd) {
+            return
+        }
+
         let source = SessionSource(rawValue: message.source) ?? .unknown
         let isNewSession = sessions[message.sessionId] == nil
         let session = sessions[message.sessionId] ?? pendingCodexAppSessions[message.sessionId] ?? Session(
