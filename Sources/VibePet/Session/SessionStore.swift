@@ -279,11 +279,16 @@ final class SessionStore {
             && assistantMessage.contains("{")
             && assistantMessage.contains("}")
 
+        // Codex app 还会在 cwd 为 "/" 的伪上下文里跑一些内部脚本（例如返回 {"exclude":[]} 之类的
+        // JSON-only 响应）。真实的用户会话一定有具体的项目目录，所以 cwd=="/" 可直接判定为自动化。
+        let cwdLooksSynthetic = (session.cwd ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == "/"
+
         // Codex app internal automation sessions look like one of:
         // 1) prompt matches a known internal template (title generation, ambient suggestions, safety filter), or
         // 2) assistant message is a compact JSON-style title response like {"title":"..."}
-        //    (kept for title sessions where we only ever see the Stop event).
-        return (fromCodexApp && (promptMatchesInternalTemplate || assistantLooksLikeTitleJSON))
+        //    (kept for title sessions where we only ever see the Stop event), or
+        // 3) cwd is the bare root "/" which only shows up for Codex app internal scripts.
+        return (fromCodexApp && (promptMatchesInternalTemplate || assistantLooksLikeTitleJSON || cwdLooksSynthetic))
             || (promptMatchesInternalTemplate && assistantLooksLikeTitleJSON)
     }
 
