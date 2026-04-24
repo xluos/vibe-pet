@@ -66,13 +66,16 @@ enum TerminalJump {
     }
 
     private static func jumpToGhostty(tabId: String?, cwd: String?) {
-        // Prefer stable tab.id captured at SessionStart. If missing, fall back to
-        // matching by working directory. Last resort — just activate the app.
+        // One osascript invocation: try tab.id first (stable identifier
+        // captured at SessionStart), fall back to working-directory match,
+        // otherwise just activate the app. Runs async on a background queue
+        // so the UI doesn't hitch on the 50-200ms osascript round-trip;
+        // logs the outcome so silent mismatches are diagnosable via
+        // `log stream --predicate 'subsystem contains "VibePet"'`.
+        let tabClause: String
         if let tabId, !tabId.isEmpty {
             let escaped = escapeForAppleScript(tabId)
-            let script = """
-            tell application "Ghostty"
-                activate
+            tabClause = """
                 set matched to false
                 repeat with w in windows
                     repeat with t in tabs of w
@@ -86,31 +89,38 @@ enum TerminalJump {
                     end repeat
                     if matched then exit repeat
                 end repeat
-                return matched
-            end tell
+                if matched then return "tab"
             """
-            runAppleScript(script)
-            return
+        } else {
+            tabClause = ""
         }
 
+        let cwdClause: String
         if let cwd, !cwd.isEmpty {
             let escaped = escapeForAppleScript(cwd)
-            let script = """
-            tell application "Ghostty"
-                activate
+            cwdClause = """
                 try
                     set matches to every terminal whose working directory is "\(escaped)"
                     if (count of matches) > 0 then
                         focus (item 1 of matches)
+                        return "cwd"
                     end if
                 end try
-            end tell
             """
-            runAppleScript(script)
-            return
+        } else {
+            cwdClause = ""
         }
 
-        activateApp(bundleId: "com.mitchellh.ghostty")
+        let script = """
+        tell application "Ghostty"
+            activate
+        \(tabClause)
+        \(cwdClause)
+            return "none"
+        end tell
+        """
+
+        runAppleScriptLogging(script, label: "ghostty tabId=\(tabId ?? "nil") cwd=\(cwd ?? "nil")")
     }
 
     private static func escapeForAppleScript(_ value: String) -> String {
@@ -133,6 +143,31 @@ enum TerminalJump {
             process.standardError = FileHandle.nullDevice
             try? process.run()
             process.waitUntilExit()
+        }
+    }
+
+    /// Async variant that logs the stdout for diagnostics. Use for AppleScript
+    /// invocations where the outcome is non-obvious (e.g. silent Ghostty tab
+    /// mismatch) so `/tmp/vibe-pet-server.log`-style tails can reveal why a
+    /// click did nothing.
+    private static func runAppleScriptLogging(_ source: String, label: String) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process()
+            let pipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            process.arguments = ["-e", source]
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+            do {
+                try process.run()
+            } catch {
+                NSLog("[VibePet][\(label)] osascript launch failed: \(error)")
+                return
+            }
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let out = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            NSLog("[VibePet][\(label)] status=\(process.terminationStatus) output=\(out)")
         }
     }
 }
