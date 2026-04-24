@@ -3,7 +3,7 @@ import Foundation
 @Observable
 final class SessionStore {
     var sessions: [String: Session] = [:]
-    private var pendingCodexAppSessions: [String: Session] = [:]
+    private var pendingCodexSessions: [String: Session] = [:]
     private let endedSessionRetentionDays = 7
     // Codex 启动项目时会并发跑多条内部自动化 session（标题生成 / ambient 建议 / ambient 安全过滤），
     // 它们的 prompt 都是固定模板，这里按 prompt 特征识别后直接丢弃，避免出现多余的会话条目和提示音。
@@ -12,6 +12,16 @@ final class SessionStore {
         "generate 0 to 3 ambient suggestions",
         "upholding safety and compliance standards for codex ambient suggestions",
     ]
+    // Claude Code 的 codex 插件（/codex:* 指令）把 codex CLI 当后台评审器调用，会发出固定模板 prompt。
+    // 这类调用不是用户主动开的会话，应当静默过滤，不论宿主终端 bundle 为何。
+    private let codexPluginPromptFingerprints: [String] = [
+        "you are codex performing an adversarial software review",
+        "run a stop-gate review of the previous claude turn",
+    ]
+    // Stop / SessionEnd 等后续事件通常只带 last_assistant_message，没有 prompt。
+    // 记下已经判定为内部自动化的 session id，避免这些事件到来时凭空重新生成一条过滤不掉的会话。
+    private var filteredCodexAutomationSessionIds: Set<String> = []
+    private let filteredCodexAutomationSessionIdCap = 256
 
     private static var storePath: URL {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".vibe-pet")
@@ -86,14 +96,20 @@ final class SessionStore {
     // MARK: - Events
 
     func handleEvent(_ message: BridgeMessage) {
-        let effectiveCwd = message.cwd ?? sessions[message.sessionId]?.cwd ?? pendingCodexAppSessions[message.sessionId]?.cwd
+        if filteredCodexAutomationSessionIds.contains(message.sessionId) {
+            sessions.removeValue(forKey: message.sessionId)
+            pendingCodexSessions.removeValue(forKey: message.sessionId)
+            return
+        }
+
+        let effectiveCwd = message.cwd ?? sessions[message.sessionId]?.cwd ?? pendingCodexSessions[message.sessionId]?.cwd
         if DirectoryFilterPreferences.shouldFilter(cwd: effectiveCwd) {
             return
         }
 
         let source = SessionSource(rawValue: message.source) ?? .unknown
         let isNewSession = sessions[message.sessionId] == nil
-        let session = sessions[message.sessionId] ?? pendingCodexAppSessions[message.sessionId] ?? Session(
+        let session = sessions[message.sessionId] ?? pendingCodexSessions[message.sessionId] ?? Session(
             id: message.sessionId,
             source: source,
             cwd: message.cwd,
@@ -119,22 +135,23 @@ final class SessionStore {
         // Codex creates an internal "title generation" task before the real task starts.
         // It has its own session id and should not be rendered as a user-facing session.
         if isInternalCodexAutomationSession(session) {
-            pendingCodexAppSessions.removeValue(forKey: message.sessionId)
+            rememberFilteredCodexAutomationSession(message.sessionId)
+            pendingCodexSessions.removeValue(forKey: message.sessionId)
             sessions.removeValue(forKey: message.sessionId)
             save()
             return
         }
 
-        if shouldDiscardPendingCodexAppSession(session, for: message) {
-            pendingCodexAppSessions.removeValue(forKey: message.sessionId)
+        if shouldDiscardPendingCodexSession(session, for: message) {
+            pendingCodexSessions.removeValue(forKey: message.sessionId)
             return
         }
 
-        if shouldDelayCodexAppSession(session, for: message) {
-            pendingCodexAppSessions[message.sessionId] = session
+        if shouldDelayCodexSession(session, for: message) {
+            pendingCodexSessions[message.sessionId] = session
             return
         }
-        pendingCodexAppSessions.removeValue(forKey: message.sessionId)
+        pendingCodexSessions.removeValue(forKey: message.sessionId)
 
         let previousStatus = session.status
         switch message.hookEvent {
@@ -250,17 +267,18 @@ final class SessionStore {
         }
     }
 
-    private func shouldDelayCodexAppSession(_ session: Session, for message: BridgeMessage) -> Bool {
+    // Codex CLI 的 SessionStart 只带元数据、没有 prompt，真实意图要等到第一条 UserPromptSubmit 才能判定。
+    // 在此之前先把会话挂起，既能让插件自动化 prompt 在抵达时被静默过滤，也避免正常 CLI 的空启动事件触发提示音。
+    private func shouldDelayCodexSession(_ session: Session, for message: BridgeMessage) -> Bool {
         guard session.source == .codex else { return false }
-        guard session.terminalBundleId == "com.openai.codex" else { return false }
 
         let hasVisiblePrompt = !(session.lastPrompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
         let hasVisibleAssistantMessage = !(session.lastAssistantMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
         return !hasVisiblePrompt && !hasVisibleAssistantMessage
     }
 
-    private func shouldDiscardPendingCodexAppSession(_ session: Session, for message: BridgeMessage) -> Bool {
-        guard pendingCodexAppSessions[session.id] != nil else { return false }
+    private func shouldDiscardPendingCodexSession(_ session: Session, for message: BridgeMessage) -> Bool {
+        guard pendingCodexSessions[session.id] != nil else { return false }
         guard message.hookEvent == "SessionEnd" else { return false }
 
         let hasVisiblePrompt = !(session.lastPrompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
@@ -275,6 +293,7 @@ final class SessionStore {
         let fromCodexApp = session.terminalBundleId == "com.openai.codex"
 
         let promptMatchesInternalTemplate = codexInternalPromptFingerprints.contains { prompt.contains($0) }
+        let promptMatchesPluginTemplate = codexPluginPromptFingerprints.contains { prompt.contains($0) }
         let assistantLooksLikeTitleJSON = assistantMessage.contains("\"title\"")
             && assistantMessage.contains("{")
             && assistantMessage.contains("}")
@@ -283,13 +302,23 @@ final class SessionStore {
         // JSON-only 响应）。真实的用户会话一定有具体的项目目录，所以 cwd=="/" 可直接判定为自动化。
         let cwdLooksSynthetic = (session.cwd ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == "/"
 
-        // Codex app internal automation sessions look like one of:
-        // 1) prompt matches a known internal template (title generation, ambient suggestions, safety filter), or
-        // 2) assistant message is a compact JSON-style title response like {"title":"..."}
-        //    (kept for title sessions where we only ever see the Stop event), or
-        // 3) cwd is the bare root "/" which only shows up for Codex app internal scripts.
+        // Codex 内部自动化 session 满足以下任一条件：
+        // 1) 来自 Codex app 且 prompt / assistant / cwd 命中已知自动化特征。
+        // 2) prompt 命中 app 内部模板且 assistant 呈 JSON title 响应（兼容仅见到 Stop 事件的 title 会话）。
+        // 3) prompt 命中 codex 插件模板（如 adversarial-review / stop-review-gate），此时与宿主 bundle 无关。
         return (fromCodexApp && (promptMatchesInternalTemplate || assistantLooksLikeTitleJSON || cwdLooksSynthetic))
             || (promptMatchesInternalTemplate && assistantLooksLikeTitleJSON)
+            || promptMatchesPluginTemplate
+    }
+
+    private func rememberFilteredCodexAutomationSession(_ sessionId: String) {
+        filteredCodexAutomationSessionIds.insert(sessionId)
+        guard filteredCodexAutomationSessionIds.count > filteredCodexAutomationSessionIdCap else { return }
+        let overflow = filteredCodexAutomationSessionIds.count - filteredCodexAutomationSessionIdCap / 2
+        for _ in 0..<overflow {
+            guard let victim = filteredCodexAutomationSessionIds.first else { break }
+            filteredCodexAutomationSessionIds.remove(victim)
+        }
     }
 
     private func attentionPriority(for status: SessionStatus) -> Int {
