@@ -31,15 +31,19 @@ wait_for_app_launch() {
 
 cd "$ROOT_DIR"
 
-echo "[VibePet] Building app bundle..."
-make bundle
+echo "[VibePet] Building and signing app bundle..."
+# 走 sign 而不是 bundle，让 Makefile 用稳定的 codesigning identity 签名，避免 ad-hoc
+# CDHash 每次变动导致 TCC 授权反复失效（Documents/自动化控制等权限每次装都弹窗）。
+make sign
 
 if pgrep -x "$APP_PROCESS_NAME" >/dev/null 2>&1; then
-  echo "[VibePet] Quitting running app..."
-  osascript -e 'tell application "VibePet" to quit' >/dev/null 2>&1 || true
+  echo "[VibePet] Stopping running app..."
+  # 用 SIGTERM 而不是 osascript，避免每次触发 "Terminal wants to control VibePet" 的
+  # 自动化权限弹窗 —— ad-hoc 签名的 CDHash 每次构建都会变，TCC 记录总是失效。
+  pkill -TERM -x "$APP_PROCESS_NAME" >/dev/null 2>&1 || true
   if ! wait_for_app_exit; then
-    echo "[VibePet] Graceful quit timed out, sending TERM..."
-    pkill -TERM -x "$APP_PROCESS_NAME" >/dev/null 2>&1 || true
+    echo "[VibePet] TERM timed out, sending KILL..."
+    pkill -KILL -x "$APP_PROCESS_NAME" >/dev/null 2>&1 || true
     wait_for_app_exit || {
       echo "[VibePet] Failed to stop running app." >&2
       exit 1
