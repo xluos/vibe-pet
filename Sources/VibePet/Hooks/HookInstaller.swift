@@ -97,6 +97,10 @@ final class HookInstaller {
             "Notification", "UserPromptSubmit", "PreToolUse", "PostToolUse",
         ]
 
+        // PermissionRequest is the only hook that writes back an approval
+        // decision — it fires after Claude has already evaluated allow/deny
+        // rules, so a long timeout is safe and needed for the user to
+        // react from VibePet. Every other event is fire-and-forget.
         for event in claudeEvents {
             let timeout: Int = event == "PermissionRequest" ? 86400 : 10
             hooks[event] = mergeHookEntry(
@@ -139,13 +143,16 @@ final class HookInstaller {
 
         var hooks = config["hooks"] as? [String: Any] ?? [:]
 
-        let codexEvents = ["SessionStart", "UserPromptSubmit", "Stop"]
+        let codexEvents = ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest"]
 
         for event in codexEvents {
+            // PermissionRequest blocks until the VibePet user decides; other
+            // events are fire-and-forget status notifications.
+            let timeout: Int = event == "PermissionRequest" ? 86400 : 5
             hooks[event] = mergeHookEntry(
                 existing: hooks[event] as? [[String: Any]] ?? [],
                 command: "\(bridgeCommand) --source codex",
-                timeout: 5
+                timeout: timeout
             )
         }
 

@@ -160,10 +160,32 @@ private struct AttentionEffectMetrics {
 
 enum ExpandedContentLayout {
     static let dividerHeight: CGFloat = 0.5
-    static let standardListTopPadding: CGFloat = 6
-    static let standardListBottomPadding: CGFloat = 14
+    static let standardListTopPadding: CGFloat = 8
+    static let standardListBottomPadding: CGFloat = 16
     static let attentionListTopPadding: CGFloat = 8
-    static let attentionListBottomPadding: CGFloat = 16
+    static let attentionListBottomPadding: CGFloat = 10
+}
+
+private struct ExpandedContentHeightPreference: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private extension View {
+    /// Report the natural (intrinsic) height of this subtree so the notch
+    /// panel can size its frame exactly to the list content.
+    func reportExpandedContentHeight() -> some View {
+        self.background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: ExpandedContentHeightPreference.self,
+                    value: proxy.size.height
+                )
+            }
+        )
+    }
 }
 
 // MARK: - Notch extension shape
@@ -210,6 +232,7 @@ struct NotchContentView: View {
     @State private var languageRefreshID = UUID()
     @AppStorage(AttentionAnimationPreferences.strongEnabledKey) private var strongAttentionAnimationEnabled = false
     @AppStorage(AttentionAnimationPreferences.styleKey) private var strongAttentionAnimationStyleRawValue = AttentionAnimationPreferences.defaultStrongStyle.rawValue
+    @AppStorage("vibepet.soundEnabled") private var soundEnabled = true
 
     private var sessionStore: SessionStore { viewModel.sessionStore }
     private var isExpanded: Bool { viewModel.isExpanded }
@@ -227,11 +250,12 @@ struct NotchContentView: View {
         let shape = NotchExtensionShape(bottomRadius: isExpanded ? 18 : 10)
 
         VStack(spacing: 0) {
-            capsuleBar
-
             if isExpanded {
+                expandedTopBar
                 expandedContent
                     .transition(.opacity)
+            } else {
+                capsuleBar
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -285,8 +309,6 @@ struct NotchContentView: View {
 
     private var expandedContent: some View {
         VStack(spacing: 0) {
-            expandedHeader
-
             Rectangle()
                 .fill(Color.white.opacity(0.06))
                 .frame(height: ExpandedContentLayout.dividerHeight)
@@ -297,53 +319,53 @@ struct NotchContentView: View {
                 sessionList
             }
         }
+        .onPreferenceChange(ExpandedContentHeightPreference.self) { innerHeight in
+            guard innerHeight > 0 else { return }
+            // Inner list doesn't include the divider — add it back so the
+            // reported height matches what the panel actually renders.
+            viewModel.measuredExpandedContentHeightHandler?(innerHeight + ExpandedContentLayout.dividerHeight)
+        }
     }
 
-    private var expandedHeader: some View {
-        HStack(spacing: 8) {
+    private var expandedTopBar: some View {
+        HStack(spacing: 12) {
             PetView(state: derivePetState())
-                .frame(width: 24, height: 24)
+                .frame(width: 20, height: 20)
 
-            Text(L10n.tr("app.name"))
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundColor(.white)
+            Spacer(minLength: 0)
 
-            if showsTransientAttentionPanel {
-                Text(L10n.tr("notch.attentionPanelTitle", attentionSessions.count))
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundColor(attentionAccentColor.opacity(0.95))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(attentionAccentColor.opacity(0.14))
-                    .clipShape(Capsule())
-            }
+            headerIconButton(
+                systemImage: soundEnabled ? "speaker.wave.2" : "speaker.slash",
+                tint: soundEnabled ? .white.opacity(0.65) : .red.opacity(0.75),
+                action: { soundEnabled.toggle() }
+            )
 
-            Spacer()
+            headerIconButton(
+                systemImage: "gearshape",
+                tint: .white.opacity(0.65),
+                action: { SettingsWindowController.show() }
+            )
 
-            Button(action: {
-                SettingsWindowController.show()
-            }) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white.opacity(0.6))
-                    .frame(width: 24, height: 24)
-                    .background(Color.white.opacity(0.08))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-
-            Button(action: viewModel.onQuit) {
-                Image(systemName: "power")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.red.opacity(0.8))
-                    .frame(width: 24, height: 24)
-                    .background(Color.white.opacity(0.08))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
+            headerIconButton(
+                systemImage: "power",
+                tint: .red.opacity(0.80),
+                action: viewModel.onQuit
+            )
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 14)
+        .frame(height: viewModel.notchHeight)
+    }
+
+    @ViewBuilder
+    private func headerIconButton(systemImage: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(tint)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var sessionList: some View {
@@ -353,45 +375,57 @@ struct NotchContentView: View {
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(Color.white.opacity(0.35))
                     .padding(.vertical, 16)
+                    .frame(maxWidth: .infinity)
+                    .reportExpandedContentHeight()
             } else {
-                // Drop .fixedSize so the ScrollView fills the bounded panel
-                // height (capped to 4 rows in NotchWindowController) and
-                // scrolls when more sessions are present.
                 ScrollView {
-                    VStack(spacing: 2) {
+                    VStack(spacing: 4) {
                         ForEach(sessionStore.allSessions) { session in
-                            SessionRowView(session: session, onArchive: {
-                                sessionStore.archiveSession(session)
-                            })
+                            SessionRowView(
+                                session: session,
+                                onArchive: { sessionStore.archiveSession(session) },
+                                onJumpToTerminal: { viewModel.onSessionClick(session) },
+                                onApprovalDecision: { decision in
+                                    sessionStore.respondToApproval(session: session, decision: decision)
+                                }
+                            )
                             .onTapGesture { viewModel.onSessionClick(session) }
                         }
                     }
                     .padding(.horizontal, 8)
                     .padding(.top, ExpandedContentLayout.standardListTopPadding)
                     .padding(.bottom, ExpandedContentLayout.standardListBottomPadding)
+                    // Measure the inner stack — the ScrollView grows to fill
+                    // the panel and would lock the height to its last size.
+                    .reportExpandedContentHeight()
                 }
             }
         }
     }
 
     private var attentionSessionList: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(attentionSessions) { session in
-                    SessionRowView(
-                        session: session,
-                        variant: .attention,
-                        onMarkRead: { viewModel.onAttentionRead(session) },
-                        onArchive: { viewModel.onAttentionArchive(session) }
-                    )
-                    .onTapGesture { viewModel.onSessionClick(session) }
-                }
+        // Attention lists are short (typically ≤3); skip ScrollView so the
+        // panel can size tightly to the content instead of locking to the
+        // ScrollView's greedy fill height.
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(attentionSessions) { session in
+                SessionRowView(
+                    session: session,
+                    variant: .attention,
+                    onMarkRead: { viewModel.onAttentionRead(session) },
+                    onArchive: { viewModel.onAttentionArchive(session) },
+                    onJumpToTerminal: { viewModel.onSessionClick(session) },
+                    onApprovalDecision: { decision in
+                        sessionStore.respondToApproval(session: session, decision: decision)
+                    }
+                )
+                .onTapGesture { viewModel.onSessionClick(session) }
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 8)
-            .padding(.top, ExpandedContentLayout.attentionListTopPadding)
-            .padding(.bottom, ExpandedContentLayout.attentionListBottomPadding)
         }
+        .padding(.horizontal, 8)
+        .padding(.top, ExpandedContentLayout.attentionListTopPadding)
+        .padding(.bottom, ExpandedContentLayout.attentionListBottomPadding)
+        .reportExpandedContentHeight()
     }
 
     // MARK: - Helpers
@@ -442,31 +476,16 @@ struct NotchExpandedMeasureView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: 12) {
                 PetView(state: petState)
-                    .frame(width: 24, height: 24)
-
-                Text(L10n.tr("app.name"))
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white)
-
-                if showsTransientAttentionPanel {
-                    Text(L10n.tr("notch.attentionPanelTitle", attentionSessions.count))
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundColor(attentionAccentColor.opacity(0.95))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(attentionAccentColor.opacity(0.14))
-                        .clipShape(Capsule())
-                }
-
-                Spacer()
-
-                CircleButton(symbol: "gearshape", foreground: .white.opacity(0.6))
-                CircleButton(symbol: "power", foreground: .red.opacity(0.8))
+                    .frame(width: 20, height: 20)
+                Spacer(minLength: 0)
+                CircleButton(symbol: "speaker.wave.2", foreground: .white.opacity(0.65))
+                CircleButton(symbol: "gearshape", foreground: .white.opacity(0.65))
+                CircleButton(symbol: "power", foreground: .red.opacity(0.80))
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .frame(height: 28)
 
             Rectangle()
                 .fill(Color.white.opacity(0.06))
@@ -479,7 +498,8 @@ struct NotchExpandedMeasureView: View {
                             session: session,
                             variant: .attention,
                             onMarkRead: {},
-                            onArchive: {}
+                            onArchive: {},
+                            onJumpToTerminal: {}
                         )
                     }
                 }
@@ -493,9 +513,9 @@ struct NotchExpandedMeasureView: View {
                     .foregroundColor(Color.white.opacity(0.35))
                     .padding(.vertical, 16)
             } else {
-                VStack(spacing: 2) {
+                VStack(spacing: 4) {
                     ForEach(sessions) { session in
-                        SessionRowView(session: session, onArchive: {})
+                        SessionRowView(session: session, onArchive: {}, onJumpToTerminal: {})
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
@@ -514,11 +534,9 @@ private struct CircleButton: View {
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: symbol == "power" ? 10 : 11, weight: .medium))
+            .font(.system(size: 11, weight: .medium))
             .foregroundColor(foreground)
-            .frame(width: 24, height: 24)
-            .background(Color.white.opacity(0.08))
-            .clipShape(Circle())
+            .frame(width: 22, height: 22)
     }
 }
 

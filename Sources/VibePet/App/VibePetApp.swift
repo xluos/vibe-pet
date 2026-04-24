@@ -29,19 +29,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         checkCodexHooksOnFirstLaunch()
 
         // Start IPC socket server
-        socketServer = SocketServer { [weak self] message in
-            let enqueuedAt = PerfLog.now()
-            DispatchQueue.main.async {
-                let mainQueueWaitMs = PerfLog.elapsedMS(since: enqueuedAt)
-                if mainQueueWaitMs >= 4 {
-                    PerfLog.log(
-                        "app.main-queue",
-                        "event=\(message.hookEvent) session=\(message.sessionId) waitMs=\(PerfLog.format(mainQueueWaitMs))"
-                    )
+        socketServer = SocketServer(
+            onMessage: { [weak self] message in
+                let enqueuedAt = PerfLog.now()
+                DispatchQueue.main.async {
+                    let mainQueueWaitMs = PerfLog.elapsedMS(since: enqueuedAt)
+                    if mainQueueWaitMs >= 4 {
+                        PerfLog.log(
+                            "app.main-queue",
+                            "event=\(message.hookEvent) session=\(message.sessionId) waitMs=\(PerfLog.format(mainQueueWaitMs))"
+                        )
+                    }
+                    self?.sessionStore.handleEvent(message)
                 }
-                self?.sessionStore.handleEvent(message)
+            },
+            onApprovalRequest: { [weak self] request, respond in
+                DispatchQueue.main.async {
+                    self?.sessionStore.handleApprovalRequest(request, respond: respond)
+                }
             }
-        }
+        )
         socketServer?.start()
 
         // Wire sound notifications

@@ -5,12 +5,24 @@ final class SocketServer {
     private static let logPath = "/tmp/vibe-pet-server.log"
 
     private let onMessage: (BridgeMessage) -> Void
+    private let onApprovalRequest: (ApprovalRequest, @escaping (ApprovalDecision) -> Void) -> Void
     private var serverFD: Int32 = -1
     private var running = false
     private let queue = DispatchQueue(label: "com.vibe-pet.socket", qos: .userInitiated)
+    // Approval fds are long-lived (waiting for user click). We dispatch the
+    // respond-then-close on this concurrent queue so a pending approval never
+    // blocks the accept loop or another approval.
+    private let approvalQueue = DispatchQueue(label: "com.vibe-pet.socket.approval", attributes: .concurrent)
 
-    init(onMessage: @escaping (BridgeMessage) -> Void) {
+    init(
+        onMessage: @escaping (BridgeMessage) -> Void,
+        onApprovalRequest: @escaping (ApprovalRequest, @escaping (ApprovalDecision) -> Void) -> Void
+    ) {
         self.onMessage = onMessage
+        self.onApprovalRequest = onApprovalRequest
+        // Writing to a socket whose remote end has closed raises SIGPIPE by
+        // default, which would kill the app. Writes return EPIPE after this.
+        signal(SIGPIPE, SIG_IGN)
     }
 
     private func log(_ msg: String) {
@@ -26,12 +38,9 @@ final class SocketServer {
     }
 
     func start() {
-        // Remove stale socket
         unlink(Self.socketPath)
-
         log("Starting socket server...")
 
-        // Create Unix domain socket
         serverFD = socket(AF_UNIX, SOCK_STREAM, 0)
         guard serverFD >= 0 else {
             log("ERROR: Failed to create socket, errno=\(errno)")
@@ -74,7 +83,6 @@ final class SocketServer {
         running = true
         log("Listening on \(Self.socketPath)")
 
-        // Accept loop on background thread
         queue.async { [weak self] in
             self?.acceptLoop()
         }
@@ -111,56 +119,119 @@ final class SocketServer {
             }
 
             log("Accepted connection, clientFD=\(clientFD)")
-
-            // Handle synchronously on this queue to avoid issues
             handleClient(fd: clientFD)
         }
         log("Accept loop exited")
     }
 
     private func handleClient(fd: Int32) {
-        defer { close(fd) }
+        // Read one \n-terminated JSON line, routed by the `type` field.
+        // Plain events: call onMessage and close immediately.
+        // Approval requests: hand the fd to an approval waiter that keeps it
+        // open until the UI resolves, then writes the decision + closes.
+        guard let line = readLine(from: fd, timeoutSeconds: 5) else {
+            log("Empty / unreadable data from client, closing fd=\(fd)")
+            close(fd)
+            return
+        }
+
+        let raw = String(data: line, encoding: .utf8) ?? "<binary>"
+        log("Incoming line (fd=\(fd)): \(raw.prefix(400))")
+
+        let type = detectType(in: line)
+
+        if type == ApprovalProtocol.requestType {
+            do {
+                let req = try JSONDecoder().decode(ApprovalRequest.self, from: line)
+                log("Approval request: reqId=\(req.requestId) session=\(req.sessionId) tool=\(req.toolName ?? "?")")
+                handleApprovalRequest(req, fd: fd)
+            } catch {
+                log("Approval decode error: \(error) — falling through and closing fd")
+                close(fd)
+            }
+            return
+        }
+
+        // Default: treat as BridgeMessage event.
+        do {
+            let message = try JSONDecoder().decode(BridgeMessage.self, from: line)
+            log("Decoded event=\(message.hookEvent) session=\(message.sessionId) source=\(message.source)")
+            onMessage(message)
+        } catch {
+            log("Decode error: \(error) raw=\(raw.prefix(200))")
+        }
+        close(fd)
+    }
+
+    private func handleApprovalRequest(_ req: ApprovalRequest, fd: Int32) {
+        // The callback may fire at any time — minutes or hours later. Close
+        // the fd after writing exactly once; guard with an atomic flag so a
+        // duplicate resolution doesn't double-close.
+        let responded = DispatchQueue(label: "com.vibe-pet.socket.approval.flag.\(req.requestId)")
+        var didRespond = false
+
+        let respond: (ApprovalDecision) -> Void = { [weak self] decision in
+            responded.sync {
+                guard !didRespond else { return }
+                didRespond = true
+                self?.approvalQueue.async {
+                    self?.writeApprovalDecision(fd: fd, decision: decision)
+                    close(fd)
+                }
+            }
+        }
+
+        onApprovalRequest(req, respond)
+    }
+
+    private func writeApprovalDecision(fd: Int32, decision: ApprovalDecision) {
+        do {
+            var data = try JSONEncoder().encode(decision)
+            data.append(0x0a)  // newline terminator matches bridge's line reader
+            _ = data.withUnsafeBytes { buf -> Int in
+                write(fd, buf.baseAddress, buf.count)
+            }
+            log("Wrote decision reqId=\(decision.requestId) decision=\(decision.decision)")
+        } catch {
+            log("Failed to encode decision: \(error)")
+        }
+    }
+
+    /// Blocking read of a single \n-terminated line from the client. Returns
+    /// the line excluding the newline, or nil on EOF / timeout / error.
+    private func readLine(from fd: Int32, timeoutSeconds: Int) -> Data? {
+        var tv = timeval(tv_sec: timeoutSeconds, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 4096)
-
-        // Set a read timeout so we don't block forever
-        var tv = timeval(tv_sec: 5, tv_usec: 0)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-
         while true {
             let bytesRead = read(fd, &buffer, buffer.count)
             if bytesRead <= 0 {
                 if bytesRead < 0 {
-                    log("Read error: errno=\(errno)")
+                    log("readLine error: errno=\(errno)")
                 }
-                break
+                return data.isEmpty ? nil : data
             }
             data.append(buffer, count: bytesRead)
-            log("Read \(bytesRead) bytes (total: \(data.count))")
-        }
-
-        guard !data.isEmpty else {
-            log("Empty data from client")
-            return
-        }
-
-        let raw = String(data: data, encoding: .utf8) ?? "<binary>"
-        log("Full message: \(raw)")
-
-        // Support newline-delimited JSON
-        let lines = data.split(separator: UInt8(ascii: "\n"))
-        let decoder = JSONDecoder()
-
-        for line in lines {
-            do {
-                let message = try decoder.decode(BridgeMessage.self, from: Data(line))
-                log("Decoded: event=\(message.hookEvent) session=\(message.sessionId) source=\(message.source)")
-                onMessage(message)
-            } catch {
-                log("Decode error: \(error)")
-                log("Raw line: \(String(data: Data(line), encoding: .utf8) ?? "<binary>")")
+            if let idx = data.firstIndex(of: 0x0a) {
+                return data[..<idx]
+            }
+            // No delimiter yet — keep reading. Safety cap to avoid runaway
+            // allocations from a malformed sender.
+            if data.count > 256 * 1024 {
+                log("readLine exceeded 256KB without newline, aborting")
+                return nil
             }
         }
+    }
+
+    /// Peek at the `type` field without a full decode so we know how to route.
+    private func detectType(in data: Data) -> String {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = obj["type"] as? String else {
+            return ""
+        }
+        return type
     }
 }

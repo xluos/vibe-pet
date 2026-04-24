@@ -49,14 +49,14 @@ final class SessionStore {
         sessions.values
             .filter { !isInternalCodexAutomationSession($0) }
             .filter { $0.status != .ended && $0.status != .archived }
-            .sorted { $0.lastEventAt > $1.lastEventAt }
+            .sorted(by: Self.rowOrdering)
     }
 
     var allSessions: [Session] {
         sessions.values
             .filter { !isInternalCodexAutomationSession($0) }
             .filter { $0.status != .archived }
-            .sorted { $0.lastEventAt > $1.lastEventAt }
+            .sorted(by: Self.rowOrdering)
     }
 
     var archivedSessions: [Session] {
@@ -118,7 +118,8 @@ final class SessionStore {
             source: source,
             cwd: message.cwd,
             tty: message.tty,
-            terminalBundleId: message.terminalBundleId
+            terminalBundleId: message.terminalBundleId,
+            terminalTabId: message.terminalTabId
         )
 
         // Revive archived sessions that are still sending events (e.g. app restarted while CLI still running)
@@ -131,6 +132,7 @@ final class SessionStore {
         if let cwd = message.cwd { session.cwd = cwd }
         if let tty = message.tty { session.tty = tty }
         if let bid = message.terminalBundleId { session.terminalBundleId = bid }
+        if let tabId = message.terminalTabId { session.terminalTabId = tabId }
         if let tool = message.toolName { session.lastToolName = tool }
         if let prompt = message.prompt { session.lastPrompt = prompt }
         if let assistMsg = message.lastAssistantMessage { session.lastAssistantMessage = assistMsg }
@@ -167,14 +169,31 @@ final class SessionStore {
             session.status = .starting
         case "UserPromptSubmit":
             session.status = .active
+            // A fresh turn just started — the prior turn's assistant reply
+            // and tool trace are stale and would misalign with the new prompt.
+            if message.lastAssistantMessage == nil {
+                session.lastAssistantMessage = nil
+            }
+            if message.toolName == nil {
+                session.lastToolName = nil
+            }
         case "PreToolUse", "PostToolUse":
             session.status = .active
         case "Stop":
             session.status = .waitingForInput
         case "PermissionRequest":
-            session.status = .needsApproval
+            // Status changes for approvals are driven by handleApprovalRequest
+            // (Codex PermissionRequest, Claude PreToolUse on dangerous tools).
+            // A plain observational PermissionRequest event arriving here
+            // — e.g. Claude's read-only hook firing after we already returned
+            // "allow" via PreToolUse — must NOT flip status back to
+            // .needsApproval, or the row renders a buttonless "ghost"
+            // approval card right under the one the user just resolved.
+            break
         case "SessionEnd":
             session.status = .ended
+            // CLI has exited — drop ephemeral session-scoped allowlist.
+            session.sessionApprovedTools.removeAll()
         case "Notification":
             break
         default:
@@ -209,6 +228,130 @@ final class SessionStore {
                 "event=\(message.hookEvent) session=\(message.sessionId) new=\(isNewSession) totalMs=\(PerfLog.format(totalMs)) saveScheduleMs=\(PerfLog.format(saveScheduleMs)) notificationMs=\(PerfLog.format(notificationMs)) status=\(previousStatus.rawValue)->\(session.status.rawValue)"
             )
         }
+    }
+
+    // MARK: - Approvals
+
+    func handleApprovalRequest(_ req: ApprovalRequest, respond: @escaping (ApprovalDecision) -> Void) {
+        let source = SessionSource(rawValue: req.source) ?? .unknown
+        let session = sessions[req.sessionId] ?? Session(
+            id: req.sessionId,
+            source: source,
+            cwd: req.cwd,
+            tty: req.tty,
+            terminalBundleId: req.terminalBundleId,
+            terminalTabId: req.terminalTabId
+        )
+
+        // Refresh identity fields the bridge just learned about.
+        if let cwd = req.cwd { session.cwd = cwd }
+        if let tty = req.tty { session.tty = tty }
+        if let bid = req.terminalBundleId { session.terminalBundleId = bid }
+        if let tabId = req.terminalTabId { session.terminalTabId = tabId }
+        if let tool = req.toolName { session.lastToolName = tool }
+        session.lastEventAt = req.date
+
+        // Session-scoped auto-approval: if the user previously clicked
+        // "本次会话允许" for this tool, respond allow immediately without
+        // showing a card or changing status.
+        if let tool = req.toolName, session.sessionApprovedTools.contains(tool) {
+            sessions[req.sessionId] = session
+            respond(ApprovalDecision(
+                requestId: req.requestId,
+                decision: "allow",
+                reason: "Session-approved tool: \(tool)"
+            ))
+            return
+        }
+
+        // If the session already had a pending approval (e.g. the user
+        // ignored the previous one and another tool call came in), auto-ask
+        // the stale one so its bridge unblocks and doesn't leak forever.
+        if let old = session.pendingApproval {
+            old.responder(ApprovalDecision(requestId: old.id, decision: "ask", reason: "Superseded by newer request"))
+        }
+
+        let previousStatus = session.status
+        session.status = .needsApproval
+        session.pendingApproval = PendingApproval(
+            id: req.requestId,
+            source: source,
+            hookEvent: req.hookEvent,
+            toolName: req.toolName,
+            toolInputPreview: req.toolInputPreview,
+            createdAt: req.date,
+            responder: respond
+        )
+        sessions[req.sessionId] = session
+        save(reason: "approval-request")
+
+        NotificationCenter.default.post(
+            name: .sessionStatusChanged,
+            object: nil,
+            userInfo: [
+                "sessionId": session.id,
+                "oldStatus": previousStatus.rawValue,
+                "newStatus": session.status.rawValue,
+                "hookEvent": "ApprovalRequest",
+            ]
+        )
+    }
+
+    /// Resolve a pending approval with the user's decision. Idempotent — the
+    /// first decision wins; subsequent calls are ignored because the bridge
+    /// has already exited.
+    ///
+    /// `decision` mirrors Claude Code's permissionDecision semantics:
+    /// "allow" / "deny" / "ask". The UI also sends "allowSession" — we treat
+    /// that as "allow" on the wire and additionally remember the tool so
+    /// future requests in the same session auto-approve without a card.
+    func respondToApproval(session: Session, decision: String, reason: String? = nil) {
+        guard let pending = session.pendingApproval else { return }
+
+        let wireDecision: String
+        let wireReason: String?
+        if decision == "allowSession" {
+            wireDecision = "allow"
+            if let tool = pending.toolName, !tool.isEmpty {
+                session.sessionApprovedTools.insert(tool)
+                wireReason = reason ?? "Session-approved: \(tool)"
+            } else {
+                wireReason = reason ?? "Session-approved"
+            }
+        } else {
+            wireDecision = decision
+            wireReason = reason ?? "VibePet user decision"
+        }
+
+        let payload = ApprovalDecision(
+            requestId: pending.id,
+            decision: wireDecision,
+            reason: wireReason
+        )
+        pending.responder(payload)
+        session.pendingApproval = nil
+
+        // When the user denies/asks we go to waitingForInput; on allow the
+        // tool will run and subsequent PreToolUse/PostToolUse will flip us
+        // back to .active naturally.
+        let previousStatus = session.status
+        switch wireDecision {
+        case "allow":
+            session.status = .active
+        default:
+            session.status = .waitingForInput
+        }
+        save(reason: "approval-decision")
+        NotificationCenter.default.post(
+            name: .sessionStatusChanged,
+            object: nil,
+            userInfo: [
+                "sessionId": session.id,
+                "oldStatus": previousStatus.rawValue,
+                "newStatus": session.status.rawValue,
+                "hookEvent": "ApprovalDecision",
+            ]
+        )
     }
 
     func archiveSession(_ session: Session) {
@@ -367,6 +510,27 @@ final class SessionStore {
             return 1
         default:
             return 0
+        }
+    }
+
+    /// Row ordering used by both the persistent expanded list and the quick
+    /// active list. User-action sessions surface on top (approval first, then
+    /// awaiting input), live work below, finished sessions at the bottom.
+    /// Within each priority bucket, more recent events come first.
+    private static func rowOrdering(_ lhs: Session, _ rhs: Session) -> Bool {
+        let lp = listPriority(for: lhs.status)
+        let rp = listPriority(for: rhs.status)
+        if lp != rp { return lp > rp }
+        return lhs.lastEventAt > rhs.lastEventAt
+    }
+
+    private static func listPriority(for status: SessionStatus) -> Int {
+        switch status {
+        case .needsApproval: return 4
+        case .waitingForInput: return 3
+        case .active, .starting: return 2
+        case .ended: return 1
+        case .archived: return 0
         }
     }
 

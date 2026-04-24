@@ -28,6 +28,10 @@ class NotchWindowController: NSWindowController {
     private var pendingProactiveAttentionPopup = false
     private var cachedExpandedContentSignature: String?
     private var cachedExpandedContentHeight: CGFloat?
+    /// Live measured expanded content height reported by SwiftUI. When set,
+    /// it overrides the estimated content height so the panel fits the actual
+    /// rendered size exactly. Reset on presentation / session changes.
+    private var measuredExpandedContentHeight: CGFloat?
     private var lastAttentionPresentationSignature: String?
     private var lastMouseCompanionContentSignature: String?
     private var lastAppliedPanelFrame: NSRect?
@@ -39,12 +43,14 @@ class NotchWindowController: NSWindowController {
     private var expandedWidth: CGFloat = 340
     private let collapsedLeftRevealWidth: CGFloat = 28
     private let collapsedRightRevealWidth: CGFloat = 36
-    private let expandedOverflowPerSide: CGFloat = 44
-    private let preferredExpandedExtraWidth: CGFloat = 80
-    private let emptyStateHeight: CGFloat = 80
+    private let expandedOverflowPerSide: CGFloat = 96
+    private let preferredExpandedExtraWidth: CGFloat = 260
+    private let emptyStateHeight: CGFloat = 68
     private let settingsContentHeight: CGFloat = 320
-    private let sessionListBaseHeight: CGFloat = 56
-    private let estimatedRowHeight: CGFloat = 68
+    // Header is drawn inside the notch strip (already counted as collapsedHeight),
+    // so the expanded list's base is divider + list top/bottom padding only.
+    private let sessionListBaseHeight: CGFloat = 24
+    private let estimatedRowHeight: CGFloat = 80
     private let maxVisibleSessionRows: Int = 4
     private let collapseDelay: TimeInterval = 0.25
     private let haloSideInset: CGFloat = 180
@@ -163,6 +169,9 @@ class NotchWindowController: NSWindowController {
             onAttentionArchive: { [weak self] session in self?.archiveAttentionSession(session) },
             onQuit: { NSApplication.shared.terminate(nil) }
         )
+        vm.measuredExpandedContentHeightHandler = { [weak self] height in
+            self?.applyMeasuredExpandedContentHeight(height)
+        }
         self.viewModel = vm
 
         let hosting = NSHostingView(rootView: NotchRootView(viewModel: vm))
@@ -315,7 +324,7 @@ class NotchWindowController: NSWindowController {
         updateAttentionHalo(relativeTo: panel)
         updateMouseCompanion()
 
-        if viewModel?.showSettings == true, isExpanded {
+        if isExpanded {
             updatePanelSize()
         }
 
@@ -387,7 +396,11 @@ class NotchWindowController: NSWindowController {
 
         let signature = expandedContentSignature()
         let rawHeight: CGFloat
-        if cachedExpandedContentSignature == signature, let cachedExpandedContentHeight {
+        if let measured = measuredExpandedContentHeight, measured > 0 {
+            rawHeight = measured
+            cachedExpandedContentSignature = signature
+            cachedExpandedContentHeight = measured
+        } else if cachedExpandedContentSignature == signature, let cachedExpandedContentHeight {
             rawHeight = cachedExpandedContentHeight
         } else {
             rawHeight = estimatedExpandedContentHeight()
@@ -395,17 +408,46 @@ class NotchWindowController: NSWindowController {
             cachedExpandedContentHeight = rawHeight
         }
 
-        return min(rawHeight, maxExpandedContentHeight)
+        // In standard mode, keep the panel from growing past a few rows;
+        // overflow scrolls inside the list. Attention popups are short by
+        // nature and don't need this soft cap.
+        let capped: CGFloat
+        if expandedPresentation == .transientAttention {
+            capped = rawHeight
+        } else {
+            capped = min(rawHeight, standardListSoftCap)
+        }
+
+        return min(capped, maxExpandedContentHeight)
+    }
+
+    private var standardListSoftCap: CGFloat {
+        ExpandedContentLayout.dividerHeight
+            + ExpandedContentLayout.standardListTopPadding
+            + CGFloat(maxVisibleSessionRows) * estimatedRowHeight
+            + CGFloat(max(0, maxVisibleSessionRows - 1)) * 4
+            + ExpandedContentLayout.standardListBottomPadding
+    }
+
+    private func applyMeasuredExpandedContentHeight(_ height: CGFloat) {
+        guard isExpanded else { return }
+        guard height > 0 else { return }
+        if let existing = measuredExpandedContentHeight, abs(existing - height) < 0.5 {
+            return
+        }
+        measuredExpandedContentHeight = height
+        applyFrame()
     }
 
     private func estimatedExpandedContentHeight() -> CGFloat {
         if expandedPresentation == .transientAttention {
             let count = max(visibleAttentionSessions.count, 1)
-            let perRow: CGFloat = 152
-            let headerHeight: CGFloat = 41
+            let perRow: CGFloat = 146
             let dividerHeight: CGFloat = 1
-            let verticalPadding: CGFloat = 24
-            return CGFloat(count) * perRow + headerHeight + dividerHeight + verticalPadding
+            let verticalPadding: CGFloat = ExpandedContentLayout.attentionListTopPadding
+                + ExpandedContentLayout.attentionListBottomPadding
+            let interRowSpacing: CGFloat = max(0, CGFloat(count - 1)) * 8
+            return CGFloat(count) * perRow + dividerHeight + verticalPadding + interRowSpacing
         }
 
         if sessionStore.allSessions.isEmpty {
@@ -889,19 +931,21 @@ class NotchWindowController: NSWindowController {
     private func scheduleProactiveAttentionCollapse() {
         proactiveAttentionCollapseTimer?.invalidate()
         guard expandedPresentation == .transientAttention else { return }
-        guard !isMouseInsideTransientAttentionPanel else { return }
+        // Always arm the timer: mouseExited is our "done hovering" signal. The
+        // cursor may still register as inside the panel rect due to tracking /
+        // frame reflow edge effects — the timer re-checks at fire time and
+        // re-arms itself if still inside, so we never get stuck open.
         let delay = AttentionAnimationPreferences.resolvedProactivePopupAutoCollapseDelay()
-        proactiveAttentionCollapseTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
             guard let self, self.expandedPresentation == .transientAttention else { return }
-            guard !self.isMouseInsideTransientAttentionPanel else {
-                self.isMouseInsidePanel = true
+            if self.isMouseInsideTransientAttentionPanel {
+                self.scheduleProactiveAttentionCollapse()
                 return
             }
             self.collapseExpanded()
         }
-        if let proactiveAttentionCollapseTimer {
-            RunLoop.main.add(proactiveAttentionCollapseTimer, forMode: .common)
-        }
+        proactiveAttentionCollapseTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     @discardableResult
@@ -959,6 +1003,7 @@ class NotchWindowController: NSWindowController {
     private func invalidateExpandedContentHeightCache() {
         cachedExpandedContentSignature = nil
         cachedExpandedContentHeight = nil
+        measuredExpandedContentHeight = nil
     }
 
     private func invalidateExpandedContentHeightCacheIfNeeded() {
@@ -1026,7 +1071,7 @@ class NotchWindowController: NSWindowController {
             : 220
         let collapsedHeight = hasNotch ? (menuBarHeight + 1) : 25
 
-        let preferredExpandedWidth = max(collapsedWidth + preferredExpandedExtraWidth, 340)
+        let preferredExpandedWidth = max(collapsedWidth + preferredExpandedExtraWidth, 480)
         let expandedWidth: CGFloat
         if hasNotch {
             expandedWidth = max(
@@ -1246,6 +1291,10 @@ class NotchViewModel {
     var showSettings: Bool = false
     var attentionPresentation: AttentionPanelPresentation = .hidden
     var attentionSessionIDs: [String] = []
+    /// SwiftUI reports the actual expanded content height via a PreferenceKey
+    /// so the panel frame can fit the content exactly instead of relying on
+    /// per-row estimates that overshoot or undershoot when content varies.
+    @ObservationIgnored var measuredExpandedContentHeightHandler: ((CGFloat) -> Void)?
 
     init(
         sessionStore: SessionStore,

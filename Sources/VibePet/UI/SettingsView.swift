@@ -54,6 +54,9 @@ struct SettingsWindowView: View {
     @State private var proactiveAttentionPopupDelayText = String(format: "%.1f", AttentionAnimationPreferences.defaultProactivePopupAutoCollapseDelay)
     @FocusState private var isProactivePopupDelayFieldFocused: Bool
     @State private var directoryFilterRules: [DirectoryFilterRule] = DirectoryFilterPreferences.loadRules()
+    // Source of truth is a cross-process flag file; mirror it into @State so
+    // Toggle re-renders on change.
+    @State private var approvalInterceptEnabled: Bool = ApprovalPreferences.isEnabled
 
     var body: some View {
         ScrollView {
@@ -137,6 +140,29 @@ struct SettingsWindowView: View {
                     settingsInfoRow("Codex CLI", icon: "x.circle.fill", iconColor: .green, value: hookStatus(for: "codex"))
                     Divider().padding(.leading, 40)
                     settingsInfoRow("Coco", icon: "c.square.fill", iconColor: .blue, value: hookStatus(for: "coco"))
+                }
+
+                // Approval interception
+                settingsSection(L10n.tr("settings.section.approvals")) {
+                    settingsToggleRow(
+                        L10n.tr("settings.approvals.enabled"),
+                        icon: "checkmark.shield",
+                        iconColor: .orange,
+                        isOn: Binding(
+                            get: { approvalInterceptEnabled },
+                            set: { newValue in
+                                approvalInterceptEnabled = newValue
+                                ApprovalPreferences.setEnabled(newValue)
+                            }
+                        )
+                    )
+                    Text(L10n.tr("settings.approvals.hint"))
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 // Data

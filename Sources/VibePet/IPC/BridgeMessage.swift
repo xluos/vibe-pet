@@ -7,6 +7,7 @@ struct BridgeMessage: Codable {
     let cwd: String?
     let tty: String?
     let terminalBundleId: String?
+    let terminalTabId: String?
     let toolName: String?
     let prompt: String?
     let lastAssistantMessage: String?
