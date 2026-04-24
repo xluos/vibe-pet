@@ -30,7 +30,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Start IPC socket server
         socketServer = SocketServer { [weak self] message in
+            let enqueuedAt = PerfLog.now()
             DispatchQueue.main.async {
+                let mainQueueWaitMs = PerfLog.elapsedMS(since: enqueuedAt)
+                if mainQueueWaitMs >= 4 {
+                    PerfLog.log(
+                        "app.main-queue",
+                        "event=\(message.hookEvent) session=\(message.sessionId) waitMs=\(PerfLog.format(mainQueueWaitMs))"
+                    )
+                }
                 self?.sessionStore.handleEvent(message)
             }
         }
@@ -86,6 +94,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        sessionStore.flushPendingSave(reason: "app-terminate")
         socketServer?.stop()
         attentionReminderCoordinator.stop()
         if let observer = soundObserver {

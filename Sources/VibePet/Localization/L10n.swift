@@ -5,7 +5,17 @@ enum L10n {
     static let languageDidChangeNotification = Notification.Name("vibepet.languageDidChange")
 
     private static let table = "Localizable"
-    private static let bundle = Bundle.module
+    // In an .app, localized resources live in Contents/Resources/*.lproj so
+    // Bundle.main finds them directly. Bundle.module's default lookup path is
+    // the .app root (sibling to Contents/), which codesign rejects — so we
+    // can't rely on it in shipped builds. Fall back to it only for dev runs
+    // like `swift run` or tests.
+    private static let bundle: Bundle = {
+        if Bundle.main.path(forResource: fallbackLanguageCode, ofType: "lproj") != nil {
+            return .main
+        }
+        return .module
+    }()
     private static let fallbackLanguageCode = "en"
 
     static func tr(_ key: String) -> String {

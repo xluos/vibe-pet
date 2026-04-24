@@ -5,6 +5,9 @@ final class SessionStore {
     var sessions: [String: Session] = [:]
     private var pendingCodexSessions: [String: Session] = [:]
     private let endedSessionRetentionDays = 7
+    private let saveDebounceInterval: TimeInterval = 0.2
+    private let persistenceQueue = DispatchQueue(label: "VibePet.SessionStore.Persistence", qos: .utility)
+    private var pendingSaveWorkItem: DispatchWorkItem?
     // Codex 启动项目时会并发跑多条内部自动化 session（标题生成 / ambient 建议 / ambient 安全过滤），
     // 它们的 prompt 都是固定模板，这里按 prompt 特征识别后直接丢弃，避免出现多余的会话条目和提示音。
     private let codexInternalPromptFingerprints: [String] = [
@@ -35,7 +38,7 @@ final class SessionStore {
         purgeInternalCodexAutomationSessions()
         purgeExpiredEndedSessions()
         if sessions.count != beforePurgeCount {
-            save()
+            save(reason: "init-cleanup", immediate: true)
         }
         refreshMissingTitles()
     }
@@ -96,6 +99,7 @@ final class SessionStore {
     // MARK: - Events
 
     func handleEvent(_ message: BridgeMessage) {
+        let handleStart = PerfLog.now()
         if filteredCodexAutomationSessionIds.contains(message.sessionId) {
             sessions.removeValue(forKey: message.sessionId)
             pendingCodexSessions.removeValue(forKey: message.sessionId)
@@ -138,7 +142,11 @@ final class SessionStore {
             rememberFilteredCodexAutomationSession(message.sessionId)
             pendingCodexSessions.removeValue(forKey: message.sessionId)
             sessions.removeValue(forKey: message.sessionId)
-            save()
+            save(reason: "drop-internal-title-session")
+            PerfLog.log(
+                "session.handle-event",
+                "event=\(message.hookEvent) session=\(message.sessionId) result=dropInternal totalMs=\(PerfLog.format(PerfLog.elapsedMS(since: handleStart)))"
+            )
             return
         }
 
@@ -175,8 +183,11 @@ final class SessionStore {
 
         sessions[message.sessionId] = session
         refreshTitleIfNeeded(for: session)
-        save()
+        let saveScheduledAt = PerfLog.now()
+        save(reason: "event-\(message.hookEvent)")
+        let saveScheduleMs = PerfLog.elapsedMS(since: saveScheduledAt)
 
+        let notificationStart = PerfLog.now()
         if session.status != previousStatus || isNewSession {
             NotificationCenter.default.post(
                 name: .sessionStatusChanged,
@@ -189,12 +200,21 @@ final class SessionStore {
                 ]
             )
         }
+
+        let totalMs = PerfLog.elapsedMS(since: handleStart)
+        let notificationMs = PerfLog.elapsedMS(since: notificationStart)
+        if totalMs >= 4 || notificationMs >= 2 || saveScheduleMs >= 1 {
+            PerfLog.log(
+                "session.handle-event",
+                "event=\(message.hookEvent) session=\(message.sessionId) new=\(isNewSession) totalMs=\(PerfLog.format(totalMs)) saveScheduleMs=\(PerfLog.format(saveScheduleMs)) notificationMs=\(PerfLog.format(notificationMs)) status=\(previousStatus.rawValue)->\(session.status.rawValue)"
+            )
+        }
     }
 
     func archiveSession(_ session: Session) {
         let previousStatus = session.status
         session.status = .archived
-        save()
+        save(reason: "archive-session")
         NotificationCenter.default.post(
             name: .sessionStatusChanged,
             object: nil,
@@ -209,27 +229,45 @@ final class SessionStore {
 
     func removeSession(_ session: Session) {
         sessions.removeValue(forKey: session.id)
-        save()
+        save(reason: "remove-session")
     }
 
     // MARK: - Persistence
 
-    private func save() {
+    func flushPendingSave(reason: String = "flush") {
+        pendingSaveWorkItem?.cancel()
+        pendingSaveWorkItem = nil
+        let snapshots = makePersistenceSnapshots()
+        persistenceQueue.sync {
+            persistSnapshots(snapshots, reason: reason)
+        }
+    }
+
+    private func save(reason: String, immediate: Bool = false) {
         purgeExpiredEndedSessions()
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .secondsSince1970
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(Array(sessions.values)) else { return }
-        try? data.write(to: Self.storePath, options: .atomic)
+        let snapshots = makePersistenceSnapshots()
+        pendingSaveWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self, snapshots] in
+            self?.persistSnapshots(snapshots, reason: reason)
+        }
+        pendingSaveWorkItem = workItem
+
+        if immediate {
+            persistenceQueue.sync(execute: workItem)
+        } else {
+            persistenceQueue.asyncAfter(deadline: .now() + saveDebounceInterval, execute: workItem)
+        }
     }
 
     private func load() {
         guard let data = try? Data(contentsOf: Self.storePath) else { return }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .secondsSince1970
-        guard let list = try? decoder.decode([Session].self, from: data) else { return }
+        guard let list = try? decoder.decode([PersistedSession].self, from: data) else { return }
         for session in list {
-            sessions[session.id] = session
+            let restored = session.makeSession()
+            sessions[restored.id] = restored
         }
     }
 
@@ -247,7 +285,7 @@ final class SessionStore {
             guard let self, let session, let title, !title.isEmpty else { return }
             guard session.title != title else { return }
             session.title = title
-            self.save()
+            self.save(reason: "title-refresh")
         }
     }
 
@@ -329,6 +367,35 @@ final class SessionStore {
             return 1
         default:
             return 0
+        }
+    }
+
+    private func makePersistenceSnapshots() -> [PersistedSession] {
+        Array(sessions.values).map(PersistedSession.init)
+    }
+
+    private func persistSnapshots(_ snapshots: [PersistedSession], reason: String) {
+        let persistStart = PerfLog.now()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+        guard let data = try? encoder.encode(snapshots) else {
+            PerfLog.log("session.persist", "reason=\(reason) status=encode-failed count=\(snapshots.count)")
+            return
+        }
+
+        do {
+            try data.write(to: Self.storePath, options: .atomic)
+            let totalMs = PerfLog.elapsedMS(since: persistStart)
+            if totalMs >= 4 {
+                PerfLog.log(
+                    "session.persist",
+                    "reason=\(reason) count=\(snapshots.count) bytes=\(data.count) totalMs=\(PerfLog.format(totalMs))"
+                )
+            }
+        } catch {
+            PerfLog.log("session.persist", "reason=\(reason) status=write-failed error=\(error)")
         }
     }
 }

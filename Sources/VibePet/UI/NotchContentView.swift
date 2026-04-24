@@ -354,6 +354,9 @@ struct NotchContentView: View {
                     .foregroundColor(Color.white.opacity(0.35))
                     .padding(.vertical, 16)
             } else {
+                // Drop .fixedSize so the ScrollView fills the bounded panel
+                // height (capped to 4 rows in NotchWindowController) and
+                // scrolls when more sessions are present.
                 ScrollView {
                     VStack(spacing: 2) {
                         ForEach(sessionStore.allSessions) { session in
@@ -363,7 +366,6 @@ struct NotchContentView: View {
                             .onTapGesture { viewModel.onSessionClick(session) }
                         }
                     }
-                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 8)
                     .padding(.top, ExpandedContentLayout.standardListTopPadding)
                     .padding(.bottom, ExpandedContentLayout.standardListBottomPadding)
@@ -752,24 +754,31 @@ private struct AttentionBodyBorderView<S: Shape>: View {
             // Continuous wave ripples with shadow
             ForEach(Array(AttentionPulseStyle.hyperRippleDelays.enumerated()), id: \.offset) { index, delay in
                 if let ripple = phase.rippleProgress(delay: delay, activeWindow: 0.55) {
-                    shape
-                        .stroke(
-                            effectColor.opacity((1 - ripple) * (index == 0 ? 1.0 : 0.75)),
-                            lineWidth: max(1.5, 2.5 - ripple * 0.7)
-                        )
-                        .shadow(color: effectColor.opacity((1 - ripple) * 0.4), radius: 3 + ripple * 5)
-                        .blur(radius: ripple * 4)
-                        .scaleEffect(1.02 + ripple * (0.2 + CGFloat(index) * 0.06))
-                        .padding(
-                            metrics.outwardPadding(
-                                baseHeightRatio: 0.12 + CGFloat(index) * 0.09,
-                                animatedRatio: 0.42,
-                                phase: ripple
-                            )
-                        )
+                    hyperRippleLayer(index: index, ripple: ripple, metrics: metrics)
                 }
             }
         }
+    }
+
+    private func hyperRippleLayer(index: Int, ripple: CGFloat, metrics: AttentionEffectMetrics) -> some View {
+        let rippleOpacity = (1 - ripple) * (index == 0 ? 1.0 : 0.75)
+        let lineWidth = max(1.5, 2.5 - ripple * 0.7)
+        let shadowOpacity = (1 - ripple) * 0.4
+        let shadowRadius = 3 + ripple * 5
+        let blurRadius = ripple * 4
+        let scale = 1.02 + ripple * (0.2 + CGFloat(index) * 0.06)
+        let padding = metrics.outwardPadding(
+            baseHeightRatio: 0.12 + CGFloat(index) * 0.09,
+            animatedRatio: 0.42,
+            phase: ripple
+        )
+
+        return shape
+            .stroke(effectColor.opacity(rippleOpacity), lineWidth: lineWidth)
+            .shadow(color: effectColor.opacity(shadowOpacity), radius: shadowRadius)
+            .blur(radius: blurRadius)
+            .scaleEffect(scale)
+            .padding(padding)
     }
 
     private func attentionShakeBodyLayers(for phase: AttentionPulsePhase, metrics: AttentionEffectMetrics) -> some View {

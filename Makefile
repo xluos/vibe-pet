@@ -6,7 +6,7 @@ PRODUCT_NAME = VibePet
 BUILD_DIR = .build/release
 BUNDLE_DIR = $(PRODUCT_NAME).app
 CONTENTS = $(BUNDLE_DIR)/Contents
-VERSION = 1.0.0
+VERSION = 2.0.2
 
 # 用本机已有的第一张有效 codesigning 身份作为默认签名身份（通常是 Apple Development
 # 或自签的 Developer ID 之流）。只有在没有任何有效身份时才回退到 ad-hoc (`-`)。
@@ -27,6 +27,11 @@ bundle: build
 	cp Info.plist $(CONTENTS)/Info.plist
 	cp VibePet.icns $(CONTENTS)/Resources/VibePet.icns
 	-cp Sources/VibePet/Resources/Sounds/*.wav $(CONTENTS)/Resources/Sounds/ 2>/dev/null || true
+	# Copy SPM-processed .lproj bundles into Contents/Resources so Bundle.main
+	# finds them. The SPM-generated VibePet_VibePet.bundle expects to live at
+	# the .app root, which codesign rejects as unsealed content.
+	rm -rf $(CONTENTS)/Resources/*.lproj
+	-cp -R $(BUILD_DIR)/VibePet_VibePet.bundle/*.lproj $(CONTENTS)/Resources/ 2>/dev/null || true
 	@echo "Built $(BUNDLE_DIR)"
 
 # 用 $(CODESIGN_IDENTITY) 签名 bundle。没有可用身份时会退化成 ad-hoc (`-`)。
