@@ -60,6 +60,12 @@ struct SessionRowView: View {
         )
         .id(languageRefreshID)
         .contentShape(Rectangle())
+        // Attach the row-level tap here (not at the call site) so it lives
+        // next to the contentShape. At the call site the inner Terminal /
+        // approval / archive Buttons could partially shadow tap handling.
+        .onTapGesture {
+            onJumpToTerminal?()
+        }
         .onReceive(timer) { now = $0 }
         .onReceive(NotificationCenter.default.publisher(for: L10n.languageDidChangeNotification)) { _ in
             languageRefreshID = UUID()

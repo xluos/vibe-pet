@@ -389,7 +389,6 @@ struct NotchContentView: View {
                                     sessionStore.respondToApproval(session: session, decision: decision)
                                 }
                             )
-                            .onTapGesture { viewModel.onSessionClick(session) }
                         }
                     }
                     .padding(.horizontal, 8)
@@ -419,7 +418,6 @@ struct NotchContentView: View {
                         sessionStore.respondToApproval(session: session, decision: decision)
                     }
                 )
-                .onTapGesture { viewModel.onSessionClick(session) }
             }
         }
         .padding(.horizontal, 8)
